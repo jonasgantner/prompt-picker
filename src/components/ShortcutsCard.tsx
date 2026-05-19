@@ -9,9 +9,9 @@ const sections = [
       { key: null, desc: "Open / close picker" },
       { key: "?", desc: "Toggle this reference" },
       { key: "Esc", desc: "Clear search / close" },
-      { key: "Enter", desc: "Paste into app & close" },
-      { key: "Shift+Enter", desc: "Copy to clipboard & close" },
-      { key: "Cmd+C", desc: "Clear all" },
+      { key: "Enter", desc: "Insert into app & close" },
+      { key: "Cmd+C", desc: "Copy focused prompt & close" },
+      { key: "Cmd+→", desc: "Focus preview" },
     ],
   },
   {
@@ -30,6 +30,14 @@ const sections = [
       { key: "Shift+↑  Shift+↓", desc: "Reorder item" },
       { key: "Shift+Tab", desc: "Remove item" },
       { key: "Cmd+↑", desc: "Jump to results" },
+    ],
+  },
+  {
+    title: "PREVIEW",
+    rows: [
+      { key: "↑  ↓", desc: "Scroll preview" },
+      { key: "PageUp  PageDown", desc: "Scroll faster" },
+      { key: "Cmd+←", desc: "Return to results" },
     ],
   },
 ];

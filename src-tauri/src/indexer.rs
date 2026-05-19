@@ -16,6 +16,14 @@ pub struct Prompt {
     pub prompt_type: Option<String>,
     pub tags: Vec<String>,
     pub pinned: bool,
+    pub section: Option<String>,
+    #[serde(rename = "sectionName")]
+    pub section_name: Option<String>,
+    #[serde(rename = "sectionIcon")]
+    pub section_icon: Option<String>,
+    #[serde(rename = "sectionOrder")]
+    pub section_order: Option<i64>,
+    pub order: Option<i64>,
     pub extends: Vec<String>,
     #[serde(rename = "hasExtends")]
     pub has_extends: bool,
@@ -31,6 +39,11 @@ struct Frontmatter {
     extends: Option<Vec<String>>,
     tags: Option<Vec<String>>,
     pinned: Option<bool>,
+    section: Option<String>,
+    section_name: Option<String>,
+    section_icon: Option<String>,
+    section_order: Option<i64>,
+    order: Option<i64>,
 }
 
 /// Derive a display name from a filename: strip .md, replace - and _ with spaces, title-case
@@ -115,6 +128,11 @@ fn parse_prompt_file(repo_name: &str, repo_root: &Path, file_path: &Path) -> Opt
         prompt_type: frontmatter.prompt_type,
         tags: frontmatter.tags.unwrap_or_default(),
         pinned: frontmatter.pinned.unwrap_or(false),
+        section: frontmatter.section,
+        section_name: frontmatter.section_name,
+        section_icon: frontmatter.section_icon,
+        section_order: frontmatter.section_order,
+        order: frontmatter.order,
         extends,
         has_extends,
         extends_count,
@@ -166,11 +184,14 @@ pub fn watch_repos(config: &Config, app_handle: AppHandle) {
 
     std::thread::spawn(move || {
         let (tx, rx) = mpsc::channel();
-        let mut debouncer = new_debouncer(Duration::from_millis(200), tx)
-            .expect("Failed to create repo watcher");
+        let mut debouncer =
+            new_debouncer(Duration::from_millis(200), tx).expect("Failed to create repo watcher");
 
         for path in &repo_paths {
-            if let Err(e) = debouncer.watcher().watch(path, notify::RecursiveMode::Recursive) {
+            if let Err(e) = debouncer
+                .watcher()
+                .watch(path, notify::RecursiveMode::Recursive)
+            {
                 eprintln!("Failed to watch repo {}: {e}", path.display());
             }
         }
@@ -178,13 +199,11 @@ pub fn watch_repos(config: &Config, app_handle: AppHandle) {
         loop {
             match rx.recv() {
                 Ok(Ok(events)) => {
-                    let md_changed = events
-                        .iter()
-                        .any(|e| {
-                            e.path
-                                .extension()
-                                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-                        });
+                    let md_changed = events.iter().any(|e| {
+                        e.path
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+                    });
                     if md_changed {
                         match config::load_config() {
                             Ok(cfg) => {

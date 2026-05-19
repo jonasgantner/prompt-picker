@@ -76,8 +76,7 @@ pub fn create_default_config() -> Result<(), String> {
     let dir = config_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("Failed to create config dir: {e}"))?;
     let path = config_path();
-    fs::write(&path, DEFAULT_CONFIG)
-        .map_err(|e| format!("Failed to write default config: {e}"))?;
+    fs::write(&path, DEFAULT_CONFIG).map_err(|e| format!("Failed to write default config: {e}"))?;
     Ok(())
 }
 
@@ -102,24 +101,19 @@ pub fn watch_config(app_handle: AppHandle) {
     let path = config_path();
     std::thread::spawn(move || {
         let (tx, rx) = mpsc::channel();
-        let mut debouncer = new_debouncer(Duration::from_millis(500), tx)
-            .expect("Failed to create config watcher");
+        let mut debouncer =
+            new_debouncer(Duration::from_millis(500), tx).expect("Failed to create config watcher");
 
         debouncer
             .watcher()
-            .watch(
-                path.parent().unwrap(),
-                notify::RecursiveMode::NonRecursive,
-            )
+            .watch(path.parent().unwrap(), notify::RecursiveMode::NonRecursive)
             .expect("Failed to watch config directory");
 
         // Keep debouncer alive and process events
         loop {
             match rx.recv() {
                 Ok(Ok(events)) => {
-                    let config_changed = events
-                        .iter()
-                        .any(|e| e.path == path);
+                    let config_changed = events.iter().any(|e| e.path == path);
                     if config_changed {
                         match load_config() {
                             Ok(config) => {

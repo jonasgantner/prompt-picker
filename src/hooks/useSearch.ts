@@ -3,6 +3,13 @@ import type { Prompt, UsageData } from "../lib/types";
 
 export interface Section {
   title: string;
+  groups: PromptGroup[];
+}
+
+export interface PromptGroup {
+  key: string;
+  title: string;
+  icon: string | null;
   items: Prompt[];
 }
 
@@ -41,6 +48,68 @@ function getUsageCount(path: string, usageData: UsageData): number {
   return usageData[path]?.count ?? 0;
 }
 
+function titleCase(value: string): string {
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`)
+    .join(" ");
+}
+
+function sectionLabel(prompt: Prompt): string {
+  return prompt.sectionName || (prompt.section ? titleCase(prompt.section) : "Other");
+}
+
+function sectionSortValue(prompt: Prompt): number {
+  if (prompt.section) return prompt.sectionOrder ?? Number.MAX_SAFE_INTEGER - 1;
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function promptSortValue(prompt: Prompt): number {
+  return prompt.order ?? Number.MAX_SAFE_INTEGER;
+}
+
+function comparePromptsInSection(a: Prompt, b: Prompt): number {
+  const orderDiff = promptSortValue(a) - promptSortValue(b);
+  if (orderDiff !== 0) return orderDiff;
+  return a.name.localeCompare(b.name);
+}
+
+function groupByPromptSection(items: Prompt[]): PromptGroup[] {
+  const groups = new Map<string, PromptGroup & { sectionOrder: number }>();
+
+  for (const prompt of items) {
+    const key = prompt.section || "__other";
+    const existing = groups.get(key);
+    if (existing) {
+      existing.items.push(prompt);
+      if (prompt.sectionIcon && !existing.icon) {
+        existing.icon = prompt.sectionIcon;
+      }
+      existing.sectionOrder = Math.min(existing.sectionOrder, sectionSortValue(prompt));
+    } else {
+      groups.set(key, {
+        key,
+        title: sectionLabel(prompt),
+        icon: prompt.sectionIcon,
+        items: [prompt],
+        sectionOrder: sectionSortValue(prompt),
+      });
+    }
+  }
+
+  return Array.from(groups.values())
+    .sort((a, b) => {
+      const orderDiff = a.sectionOrder - b.sectionOrder;
+      if (orderDiff !== 0) return orderDiff;
+      return a.title.localeCompare(b.title);
+    })
+    .map(({ sectionOrder: _sectionOrder, ...group }) => ({
+      ...group,
+      items: group.items.slice().sort(comparePromptsInSection),
+    }));
+}
+
 export function useSearch(
   prompts: Prompt[],
   searchText: string,
@@ -67,7 +136,7 @@ function buildHomeSections(
     .filter((p) => p.pinned)
     .sort((a, b) => a.name.localeCompare(b.name));
   if (pinned.length > 0) {
-    sections.push({ title: "PINNED", items: pinned });
+    sections.push({ title: "PINNED", groups: groupByPromptSection(pinned) });
     pinned.forEach((p) => pinnedSet.add(p.path));
   }
 
@@ -84,7 +153,7 @@ function buildHomeSections(
     })
     .slice(0, 5);
   if (frequent.length > 0) {
-    sections.push({ title: "FREQUENT", items: frequent });
+    sections.push({ title: "FREQUENT", groups: groupByPromptSection(frequent) });
     frequent.forEach((p) => frequentSet.add(p.path));
   }
 
@@ -100,10 +169,12 @@ function buildHomeSections(
     .sort((a, b) => a.name.localeCompare(b.name));
   const allItems = [...firstClass, ...plain];
   if (allItems.length > 0) {
-    sections.push({ title: "ALL PROMPTS", items: allItems });
+    sections.push({ title: "ALL PROMPTS", groups: groupByPromptSection(allItems) });
   }
 
-  const flatResults = sections.flatMap((s) => s.items);
+  const flatResults = sections.flatMap((s) =>
+    s.groups.flatMap((group) => group.items),
+  );
   return { sections, flatResults };
 }
 

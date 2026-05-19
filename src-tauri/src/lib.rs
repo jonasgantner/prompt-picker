@@ -5,7 +5,7 @@ mod resolver;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
@@ -25,6 +25,17 @@ fn app_version() -> &'static str {
             .ok()
             .and_then(|v| v["version"].as_str().map(String::from))
             .unwrap_or_else(|| "0.0.0".to_string())
+    })
+}
+
+fn app_identifier() -> &'static str {
+    const CONF: &str = include_str!("../tauri.conf.json");
+    static IDENTIFIER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    IDENTIFIER.get_or_init(|| {
+        serde_json::from_str::<serde_json::Value>(CONF)
+            .ok()
+            .and_then(|v| v["identifier"].as_str().map(String::from))
+            .unwrap_or_else(|| "com.prompt-picker.app".to_string())
     })
 }
 
@@ -52,8 +63,7 @@ mod macos_focus {
     pub fn activate_pid(pid: i32) {
         unsafe {
             if let Some(cls) = Class::get("NSRunningApplication") {
-                let app: *mut Object =
-                    msg_send![cls, runningApplicationWithProcessIdentifier: pid];
+                let app: *mut Object = msg_send![cls, runningApplicationWithProcessIdentifier: pid];
                 if !app.is_null() {
                     // NSApplicationActivateAllWindows | NSApplicationActivateIgnoringOtherApps
                     let _: bool = msg_send![app, activateWithOptions: 3u64];
@@ -85,6 +95,112 @@ mod macos_focus {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod macos_launch_agent {
+    use std::path::PathBuf;
+
+    fn plist_path(label: &str) -> Result<PathBuf, String> {
+        let home =
+            dirs::home_dir().ok_or_else(|| "Could not determine home directory".to_string())?;
+        Ok(home
+            .join("Library")
+            .join("LaunchAgents")
+            .join(format!("{label}.plist")))
+    }
+
+    fn escape_xml(value: &str) -> String {
+        value
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    }
+
+    fn plist_contents(label: &str, executable: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+</dict>
+</plist>
+"#,
+            escape_xml(label),
+            escape_xml(executable),
+        )
+    }
+
+    pub fn is_enabled(label: &str) -> bool {
+        plist_path(label).map(|path| path.exists()).unwrap_or(false)
+    }
+
+    pub fn enable(label: &str) -> Result<(), String> {
+        let path = plist_path(label)?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)
+                .map_err(|e| format!("Failed to create LaunchAgents directory: {e}"))?;
+        }
+
+        let exe = std::env::current_exe()
+            .map_err(|e| format!("Failed to determine current executable: {e}"))?;
+        let executable = exe.to_string_lossy();
+        std::fs::write(&path, plist_contents(label, &executable))
+            .map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+        Ok(())
+    }
+
+    pub fn disable(label: &str) -> Result<(), String> {
+        let path = plist_path(label)?;
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("Failed to remove {}: {e}", path.display()))?;
+        }
+        Ok(())
+    }
+}
+
+fn launch_at_login_enabled() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_launch_agent::is_enabled(app_identifier())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+fn toggle_launch_at_login() -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let label = app_identifier();
+        let next_enabled = !macos_launch_agent::is_enabled(label);
+        if next_enabled {
+            macos_launch_agent::enable(label)?;
+        } else {
+            macos_launch_agent::disable(label)?;
+        }
+        Ok(next_enabled)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Launch at Login is only supported on macOS.".to_string())
+    }
+}
+
 /// Center the window on whichever monitor currently contains the mouse cursor.
 fn center_on_active_screen(window: &tauri::WebviewWindow) {
     if let Ok(cursor) = window.cursor_position() {
@@ -98,12 +214,10 @@ fn center_on_active_screen(window: &tauri::WebviewWindow) {
                 let bottom = top + size.height as f64;
 
                 if cursor.x >= left && cursor.x < right && cursor.y >= top && cursor.y < bottom {
-                    let win_size = window
-                        .outer_size()
-                        .unwrap_or(tauri::PhysicalSize {
-                            width: 460,
-                            height: 400,
-                        });
+                    let win_size = window.outer_size().unwrap_or(tauri::PhysicalSize {
+                        width: 900,
+                        height: 680,
+                    });
                     let x = pos.x + (size.width as i32 - win_size.width as i32) / 2;
                     let y = pos.y + (size.height as i32 - win_size.height as i32) / 2;
                     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
@@ -259,9 +373,7 @@ fn get_prompt_content(path: String, repo: String) -> Result<String, String> {
 #[tauri::command]
 fn copy_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
-    app.clipboard()
-        .write_text(text)
-        .map_err(|e| e.to_string())
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -287,13 +399,17 @@ fn paste_to_app(app: tauri::AppHandle, text: String) -> Result<(), String> {
         .write_text(text)
         .map_err(|e| e.to_string())?;
 
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+
     #[cfg(target_os = "macos")]
     {
         let pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
         if pid > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(80));
             macos_focus::activate_pid(pid);
-            // Brief delay to let the target app gain focus before pasting
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(220));
             macos_focus::simulate_paste();
         }
     }
@@ -346,7 +462,7 @@ pub fn run() {
         .setup(move |app| {
             let _window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Prompt Picker")
-                .inner_size(460.0, 400.0)
+                .inner_size(900.0, 680.0)
                 .resizable(false)
                 .decorations(false)
                 .transparent(true)
@@ -359,8 +475,18 @@ pub fn run() {
 
             let open_config_i =
                 MenuItem::with_id(app, "open_config", "Open Config", true, None::<&str>)?;
+            let open_prompts_i =
+                MenuItem::with_id(app, "open_prompts", "Open Prompt Folder", true, None::<&str>)?;
             let reload_i =
                 MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
+            let launch_at_login_i = CheckMenuItem::with_id(
+                app,
+                "launch_at_login",
+                "Launch at Login",
+                true,
+                launch_at_login_enabled(),
+                None::<&str>,
+            )?;
             let about_i = MenuItem::with_id(
                 app,
                 "about",
@@ -371,17 +497,26 @@ pub fn run() {
             let copy_frontmatter_i = MenuItem::with_id(
                 app,
                 "copy_frontmatter",
-                "Copy Example Frontmatter",
+                "Copy Prompt Frontmatter Template",
                 true,
                 None::<&str>,
             )?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
-                &[&open_config_i, &reload_i, &copy_frontmatter_i, &about_i, &quit_i],
+                &[
+                    &open_config_i,
+                    &open_prompts_i,
+                    &reload_i,
+                    &launch_at_login_i,
+                    &copy_frontmatter_i,
+                    &about_i,
+                    &quit_i,
+                ],
             )?;
 
             let app_handle_for_reload = app.handle().clone();
+            let launch_at_login_item = launch_at_login_i.clone();
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
@@ -390,6 +525,23 @@ pub fn run() {
                     "open_config" => {
                         let _ = config::open_config_file();
                     }
+                    "open_prompts" => {
+                        if let Ok(cfg) = config::load_config() {
+                            if let Some(repo) = cfg.repos.first() {
+                                let _ = open::that(config::expand_path(&repo.path));
+                            }
+                        }
+                    }
+                    "launch_at_login" => match toggle_launch_at_login() {
+                        Ok(enabled) => {
+                            let _ = launch_at_login_item.set_checked(enabled);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to toggle Launch at Login: {e}");
+                            let _ = launch_at_login_item
+                                .set_checked(launch_at_login_enabled());
+                        }
+                    },
                     "reload" => {
                         if let Ok(cfg) = config::load_config() {
                             let prompts = indexer::scan(&cfg);
@@ -403,11 +555,11 @@ pub fn run() {
                     }
                     "copy_frontmatter" => {
                         use tauri_plugin_clipboard_manager::ClipboardExt;
-                        let example = "---\nname: My Prompt\ntype: prompt\nextends:\n  - base-instructions\ntags:\n  - coding\n  - review\npinned: false\n---\n";
+                        let example = "---\ntype: prompt\nname: \"New prompt\"\nsection: start\nsection_name: Start\nsection_icon: play-circle\nsection_order: 10\norder: 10\ntags:\n  - agent\npinned: true\n---\n";
                         let _ = app.clipboard().write_text(example);
                     }
                     "about" => {
-                        let _ = open::that("https://github.com/mkopecki/prompt-picker");
+                        let _ = open::that("https://github.com/jonasgantner/prompt-picker");
                     }
                     "quit" => {
                         app.exit(0);

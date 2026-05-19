@@ -5,6 +5,11 @@ export interface Prompt {
   type: "prompt" | null;
   tags: string[];
   pinned: boolean;
+  section: string | null;
+  sectionName: string | null;
+  sectionIcon: string | null;
+  sectionOrder: number | null;
+  order: number | null;
   extends: string[];
   hasExtends: boolean;
   extendsCount: number;
@@ -21,7 +26,7 @@ export interface Config {
   repos: Repo[];
 }
 
-export type FocusContext = "results" | "staging";
+export type FocusContext = "results" | "staging" | "preview";
 
 export interface UsageData {
   [path: string]: { count: number; lastUsed: string };

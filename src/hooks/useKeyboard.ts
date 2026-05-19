@@ -20,10 +20,12 @@ interface UseKeyboardParams {
   onCopyAndClose: (paste: boolean) => void;
   onSwitchToStaging: () => void;
   onSwitchToResults: () => void;
+  onSwitchToPreview: () => void;
   onRemoveStaged: (path: string) => void;
   onReorder: (from: number, to: number) => void;
-  onClearAll: () => void;
+  onCopyFocused: () => void;
   searchInputRef: React.RefObject<HTMLInputElement | null>;
+  previewRef: React.RefObject<HTMLDivElement | null>;
 }
 
 export function useKeyboard({
@@ -42,10 +44,12 @@ export function useKeyboard({
   onCopyAndClose,
   onSwitchToStaging,
   onSwitchToResults,
+  onSwitchToPreview,
   onRemoveStaged,
   onReorder,
-  onClearAll,
+  onCopyFocused,
   searchInputRef,
+  previewRef,
 }: UseKeyboardParams) {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -96,15 +100,16 @@ export function useKeyboard({
 
       if (e.key === "Enter") {
         e.preventDefault();
-        // Enter = paste into previous app, Shift+Enter = copy only
+        // Enter inserts into the previous app. Shift+Enter remains a quiet
+        // copy-only fallback, but the primary copy shortcut is Cmd+C.
         onCopyAndClose(!e.shiftKey);
         return;
       }
 
-      // Cmd+C: clear all (search + staged items)
+      // Cmd+C: copy the currently focused prompt/composition
       if (e.key === "c" && e.metaKey) {
         e.preventDefault();
-        onClearAll();
+        onCopyFocused();
         return;
       }
 
@@ -115,16 +120,23 @@ export function useKeyboard({
             if (e.metaKey && stagedItems.length > 0) {
               onSwitchToStaging();
             } else if (flatResults.length > 0) {
-              setHighlightIndex((highlightIndex + 1) % flatResults.length);
+              setHighlightIndex(
+                Math.min(highlightIndex + 1, flatResults.length - 1),
+              );
+            }
+            break;
+          }
+          case "ArrowRight": {
+            if (e.metaKey) {
+              e.preventDefault();
+              onSwitchToPreview();
             }
             break;
           }
           case "ArrowUp": {
             e.preventDefault();
             if (flatResults.length > 0) {
-              setHighlightIndex(
-                (highlightIndex - 1 + flatResults.length) % flatResults.length,
-              );
+              setHighlightIndex(Math.max(highlightIndex - 1, 0));
             }
             break;
           }
@@ -145,8 +157,15 @@ export function useKeyboard({
               setStagingHighlight(stagingHighlight + 1);
             } else if (!e.shiftKey && stagedItems.length > 0) {
               setStagingHighlight(
-                (stagingHighlight + 1) % stagedItems.length,
+                Math.min(stagingHighlight + 1, stagedItems.length - 1),
               );
+            }
+            break;
+          }
+          case "ArrowRight": {
+            if (e.metaKey) {
+              e.preventDefault();
+              onSwitchToPreview();
             }
             break;
           }
@@ -158,10 +177,7 @@ export function useKeyboard({
               onReorder(stagingHighlight, stagingHighlight - 1);
               setStagingHighlight(stagingHighlight - 1);
             } else if (!e.shiftKey && stagedItems.length > 0) {
-              setStagingHighlight(
-                (stagingHighlight - 1 + stagedItems.length) %
-                  stagedItems.length,
-              );
+              setStagingHighlight(Math.max(stagingHighlight - 1, 0));
             }
             break;
           }
@@ -180,6 +196,36 @@ export function useKeyboard({
             if (!searchText && stagedItems[stagingHighlight]) {
               e.preventDefault();
               onRemoveStaged(stagedItems[stagingHighlight].path);
+            }
+            break;
+          }
+        }
+      } else if (focusContext === "preview") {
+        switch (e.key) {
+          case "ArrowDown": {
+            e.preventDefault();
+            previewRef.current?.scrollBy({ top: 52, behavior: "smooth" });
+            break;
+          }
+          case "ArrowUp": {
+            e.preventDefault();
+            previewRef.current?.scrollBy({ top: -52, behavior: "smooth" });
+            break;
+          }
+          case "PageDown": {
+            e.preventDefault();
+            previewRef.current?.scrollBy({ top: 360, behavior: "smooth" });
+            break;
+          }
+          case "PageUp": {
+            e.preventDefault();
+            previewRef.current?.scrollBy({ top: -360, behavior: "smooth" });
+            break;
+          }
+          case "ArrowLeft": {
+            if (e.metaKey) {
+              e.preventDefault();
+              onSwitchToResults();
             }
             break;
           }
@@ -205,9 +251,11 @@ export function useKeyboard({
     onCopyAndClose,
     onSwitchToStaging,
     onSwitchToResults,
+    onSwitchToPreview,
     onRemoveStaged,
     onReorder,
-    onClearAll,
+    onCopyFocused,
     searchInputRef,
+    previewRef,
   ]);
 }

@@ -2,7 +2,7 @@
 name = "prompt-picker"
 version = "0.1.0"
 description = "A macOS menubar prompt picker utility"
-authors = ["you"]
+authors = ["Jonas Gantner"]
 edition = "2021"
 
 [lib]

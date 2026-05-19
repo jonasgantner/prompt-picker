@@ -57,7 +57,7 @@ class ErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="w-[460px] min-h-[200px] bg-white dark:bg-neutral-800 rounded-xl border-[0.5px] border-neutral-200/50 dark:border-neutral-700/50 shadow-2xl flex items-center justify-center p-8">
+        <div className="w-[900px] min-h-[200px] bg-white dark:bg-neutral-800 rounded-xl border-[0.5px] border-neutral-200/50 dark:border-neutral-700/50 shadow-2xl flex items-center justify-center p-8">
           <div className="text-center">
             <p className="text-sm text-neutral-600 dark:text-neutral-300">Something went wrong.</p>
             <p className="text-[12px] text-neutral-500 dark:text-neutral-400 mt-1">
@@ -94,6 +94,12 @@ async function recordUsage(paths: string[]): Promise<void> {
   }
 }
 
+interface PreviewTarget {
+  path: string;
+  repo: string;
+  name: string;
+}
+
 function AppContent() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [config, setConfig] = useState<Config | null>(null);
@@ -109,9 +115,11 @@ function AppContent() {
   const [stagingHighlight, setStagingHighlight] = useState(0);
   const [wordCount, setWordCount] = useState(0);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
   const [version, setVersion] = useState("");
   const [showShortcuts, setShowShortcuts] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
   const { sections, flatResults } = useSearch(prompts, searchText, usageData);
   const stagedPaths = new Set(stagedItems.map((i) => i.path));
@@ -160,19 +168,6 @@ function AppContent() {
     }
   }, [prompts, stagedItems]);
 
-  // Hide window on blur
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-    const unlisten = appWindow.onFocusChanged(({ payload: focused }) => {
-      if (!focused) {
-        appWindow.hide();
-      }
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
   // Focus search input when window gains focus
   useEffect(() => {
     const appWindow = getCurrentWindow();
@@ -214,31 +209,53 @@ function AppContent() {
     });
   }, [stagedItems]);
 
-  // Load preview content for the currently highlighted item
+  // Track the currently highlighted item for preview. Keep it stable when the
+  // preview itself has focus so arrow keys can scroll the preview pane.
   useEffect(() => {
-    if (stagedItems.length === 0) {
-      setPreviewContent(null);
+    if (focusContext === "preview") {
       return;
     }
 
-    let target: { path: string; repo: string } | null = null;
+    let target: PreviewTarget | null = null;
 
     if (focusContext === "results" && flatResults[highlightIndex]) {
       target = flatResults[highlightIndex];
     } else if (focusContext === "staging" && stagedItems[stagingHighlight]) {
       const staged = stagedItems[stagingHighlight];
-      target = { path: staged.path, repo: staged.repo };
+      target = { path: staged.path, repo: staged.repo, name: staged.name };
     }
 
+    setPreviewTarget(target);
+  }, [focusContext, highlightIndex, stagingHighlight, stagedItems, flatResults]);
+
+  // Load preview content whenever the selected preview target changes.
+  useEffect(() => {
+    let cancelled = false;
+
+    const target = previewTarget;
     if (target) {
       const { path, repo } = target;
       getPromptContent(path, repo)
-        .then(setPreviewContent)
-        .catch(() => setPreviewContent(null));
+        .then((content) => {
+          if (!cancelled) setPreviewContent(content);
+        })
+        .catch(() => {
+          if (!cancelled) setPreviewContent(null);
+        });
     } else {
       setPreviewContent(null);
     }
-  }, [focusContext, highlightIndex, stagingHighlight, stagedItems, flatResults]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewTarget]);
+
+  useEffect(() => {
+    if (focusContext === "preview") {
+      previewRef.current?.focus();
+    }
+  }, [focusContext]);
 
   const handleToggleStage = useCallback(
     async (prompt: Prompt) => {
@@ -326,6 +343,43 @@ function AppContent() {
     }
   }, [stagedItems, flatResults, highlightIndex]);
 
+  const handleCopyFocused = useCallback(async () => {
+    const target =
+      focusContext === "staging" && stagedItems[stagingHighlight]
+        ? stagedItems[stagingHighlight]
+        : focusContext === "preview" && previewTarget
+          ? previewTarget
+          : flatResults[highlightIndex];
+
+    if (!target) {
+      return;
+    }
+
+    const content = await getPromptContent(target.path, target.repo);
+    await copyToClipboard(content);
+    await recordUsage([target.path]);
+    setUsageData((prev) => ({
+      ...prev,
+      [target.path]: {
+        count: (prev[target.path]?.count ?? 0) + 1,
+        lastUsed: new Date().toISOString(),
+      },
+    }));
+    setStagedItems([]);
+    setSearchText("");
+    setChainErrors([]);
+    setFocusContext("results");
+    await restorePreviousFocus();
+    getCurrentWindow().hide();
+  }, [
+    focusContext,
+    stagedItems,
+    stagingHighlight,
+    previewTarget,
+    flatResults,
+    highlightIndex,
+  ]);
+
   const handleRemoveStaged = useCallback(
     (path: string) => {
       setStagedItems(removeFromStaging(stagedItems, path, chainCache));
@@ -356,15 +410,12 @@ function AppContent() {
     onCopyAndClose: handleCopyAndClose,
     onSwitchToStaging: () => setFocusContext("staging"),
     onSwitchToResults: () => setFocusContext("results"),
+    onSwitchToPreview: () => setFocusContext("preview"),
     onRemoveStaged: handleRemoveStaged,
     onReorder: handleReorder,
-    onClearAll: () => {
-      setStagedItems([]);
-      setSearchText("");
-      setChainErrors([]);
-      setFocusContext("results");
-    },
+    onCopyFocused: handleCopyFocused,
     searchInputRef,
+    previewRef,
   });
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -375,15 +426,15 @@ function AppContent() {
     if (!el) return;
 
     const observer = new ResizeObserver(() => {
-      const height = Math.min(Math.max(el.scrollHeight, 200), 600);
-      getCurrentWindow().setSize(new LogicalSize(460, height));
+      const height = Math.min(Math.max(el.scrollHeight, 200), 760);
+      getCurrentWindow().setSize(new LogicalSize(900, height));
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
   return (
-    <div ref={containerRef} className="w-[460px] min-h-[200px] max-h-[600px] bg-white dark:bg-neutral-800 rounded-xl border-[0.5px] border-neutral-200/50 dark:border-neutral-700/50 shadow-2xl overflow-hidden flex flex-col">
+    <div ref={containerRef} className="w-[900px] min-h-[200px] max-h-[760px] bg-white dark:bg-neutral-800 rounded-xl border-[0.5px] border-neutral-200/50 dark:border-neutral-700/50 shadow-2xl overflow-hidden flex flex-col">
       <div
         className="h-4 shrink-0 cursor-grab active:cursor-grabbing rounded-t-xl"
         onMouseDown={() => getCurrentWindow().startDragging()}
@@ -401,40 +452,47 @@ function AppContent() {
         </div>
       ) : (
         <>
-          <div className="flex-1 overflow-y-auto px-3 py-2">
-            {config && config.repos.length === 0 ? (
-              <EmptyState
-                title="No prompt folders configured"
-                subtitle="Edit ~/.config/prompt-picker/config.toml"
-                onAction={() => openConfig()}
-              />
-            ) : prompts.length === 0 && !searchText ? (
-              <EmptyState title="No prompts found in configured folders." />
-            ) : (
-              <ResultsList
-                sections={sections}
-                flatResults={flatResults}
-                searchText={searchText}
-                highlightIndex={highlightIndex}
-                stagedPaths={stagedPaths}
-                usageData={usageData}
-                onSelect={handleToggleStage}
-                onHighlight={setHighlightIndex}
-              />
-            )}
+          <div className="flex-1 min-h-0 overflow-hidden px-3 py-2 flex gap-3">
+            <div className="w-[360px] min-w-0 flex flex-col overflow-hidden">
+              <div data-results-scroll className="flex-1 min-h-0 overflow-y-auto">
+                {config && config.repos.length === 0 ? (
+                  <EmptyState
+                    title="No prompt folders configured"
+                    subtitle="Edit ~/.config/prompt-picker/config.toml"
+                    onAction={() => openConfig()}
+                  />
+                ) : prompts.length === 0 && !searchText ? (
+                  <EmptyState title="No prompts found in configured folders." />
+                ) : (
+                  <ResultsList
+                    sections={sections}
+                    flatResults={flatResults}
+                    searchText={searchText}
+                    highlightIndex={highlightIndex}
+                    stagedPaths={stagedPaths}
+                    usageData={usageData}
+                    onSelect={handleToggleStage}
+                    onHighlight={setHighlightIndex}
+                  />
+                )}
+              </div>
+              {stagedItems.length > 0 && (
+                <StagingArea
+                  items={stagedItems}
+                  highlightIndex={stagingHighlight}
+                  isActive={focusContext === "staging"}
+                  errors={chainErrors}
+                  onRemove={handleRemoveStaged}
+                />
+              )}
+            </div>
+            <PreviewPane
+              ref={previewRef}
+              content={previewContent}
+              prompt={previewTarget}
+              isActive={focusContext === "preview"}
+            />
           </div>
-          {stagedItems.length > 0 && (
-            <>
-              <StagingArea
-                items={stagedItems}
-                highlightIndex={stagingHighlight}
-                isActive={focusContext === "staging"}
-                errors={chainErrors}
-                onRemove={handleRemoveStaged}
-              />
-              <PreviewPane content={previewContent} />
-            </>
-          )}
         </>
       )}
       <HintBar
@@ -444,6 +502,8 @@ function AppContent() {
         searchText={searchText}
         version={version}
         showShortcuts={showShortcuts}
+        hasPreview={previewTarget !== null}
+        focusContext={focusContext}
       />
     </div>
   );

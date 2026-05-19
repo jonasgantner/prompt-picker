@@ -76,7 +76,9 @@ pub fn resolve_chain(path: &str, repo: &str, prompts: &[Prompt]) -> ResolvedChai
         if let Some(prompt) = lookup.get(&(repo, current_path)) {
             // Recursively resolve dependencies first
             for dep_path in &prompt.extends {
-                dfs(dep_path, repo, lookup, visited, stack, result, errors, false);
+                dfs(
+                    dep_path, repo, lookup, visited, stack, result, errors, false,
+                );
             }
         } else if !is_root {
             errors.push(ChainError {
@@ -92,7 +94,10 @@ pub fn resolve_chain(path: &str, repo: &str, prompts: &[Prompt]) -> ResolvedChai
         visited.insert(key);
 
         // Add this item if not already in result (deduplication)
-        if !result.iter().any(|item| item.path == current_path && item.repo == repo) {
+        if !result
+            .iter()
+            .any(|item| item.path == current_path && item.repo == repo)
+        {
             let (name, item_repo) = if let Some(prompt) = lookup.get(&(repo, current_path)) {
                 (prompt.name.clone(), prompt.repo.clone())
             } else {

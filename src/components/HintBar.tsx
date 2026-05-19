@@ -1,3 +1,5 @@
+import type { FocusContext } from "../lib/types";
+
 interface HintBarProps {
   stagedCount: number;
   totalPromptCount: number;
@@ -5,6 +7,8 @@ interface HintBarProps {
   searchText: string;
   version: string;
   showShortcuts: boolean;
+  hasPreview: boolean;
+  focusContext: FocusContext;
 }
 
 function KeyBadge({ label }: { label: string }) {
@@ -22,6 +26,8 @@ export default function HintBar({
   searchText,
   version,
   showShortcuts,
+  hasPreview,
+  focusContext,
 }: HintBarProps) {
   const isHome = searchText === "" && stagedCount === 0;
 
@@ -49,7 +55,15 @@ export default function HintBar({
                 add
               </span>
             </span>
-            {stagedCount > 0 && (
+            {stagedCount > 0 && focusContext === "results" && (
+              <span className="flex items-center gap-1">
+                <KeyBadge label="⌘↓" />
+                <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  staged
+                </span>
+              </span>
+            )}
+            {stagedCount > 0 && focusContext === "staging" && (
               <span className="flex items-center gap-1">
                 <KeyBadge label="⇧↑↓" />
                 <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
@@ -60,11 +74,19 @@ export default function HintBar({
             <span className="flex items-center gap-1">
               <KeyBadge label="⏎" />
               <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                paste
+                insert
               </span>
             </span>
+            {hasPreview && (
+              <span className="flex items-center gap-1">
+                <KeyBadge label="⌘→" />
+                <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  preview
+                </span>
+              </span>
+            )}
             <span className="flex items-center gap-1">
-              <KeyBadge label="⇧⏎" />
+              <KeyBadge label="⌘C" />
               <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
                 copy
               </span>
