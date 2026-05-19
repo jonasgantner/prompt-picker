@@ -332,7 +332,7 @@ function AppContent() {
     setChainErrors([]);
 
     if (paste) {
-      // Copy to clipboard, restore focus, and simulate Cmd+V paste
+      // Native paste is scheduled asynchronously, then the picker hides.
       await pasteToApp(joined);
       getCurrentWindow().hide();
     } else {

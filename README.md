@@ -138,6 +138,18 @@ bun tauri build
 
 The built `.app` and `.dmg` will be in `src-tauri/target/release/bundle/`.
 
+For a local macOS build that should keep Accessibility permission stable across reinstalls, create a trusted local code-signing identity named `Prompt Picker Local Code Signing`, then run:
+
+```bash
+scripts/build-local-signed.sh
+```
+
+The default config uses ad-hoc signing so CI and release builds do not depend on a private local Keychain identity. Override the local identity name with:
+
+```bash
+PROMPT_PICKER_SIGNING_IDENTITY="Your Identity Name" scripts/build-local-signed.sh
+```
+
 For development with hot-reload:
 
 ```bash
@@ -221,14 +233,27 @@ prompt-picker requires the following macOS permissions:
 
 - **Accessibility** — needed for the auto-paste feature (`Enter` to paste). The app simulates a `Cmd+V` keystroke in the previously focused app, which requires accessibility access. Grant it in **System Settings > Privacy & Security > Accessibility**. Without this permission, `Enter` will copy to clipboard but the paste won't go through.
 
-If `Enter` copies the prompt but does not insert it, remove **Prompt Picker** from the Accessibility list, add `/Applications/Prompt Picker.app` again, then quit and relaunch the app. Local builds are ad-hoc signed with the stable `com.prompt-picker.app` identifier so this permission survives normal rebuilds after the first grant.
+If `Enter` copies the prompt but does not insert it, use the tray menu item **Copy Paste Diagnostics**. The important line is `accessibility_trusted: true`.
+
+For stale or duplicate Accessibility entries:
+
+```bash
+osascript -e 'tell application id "com.jonasgantner.promptpicker" to quit' -e 'tell application "System Settings" to quit'
+xattr -rd com.apple.quarantine "/Applications/Prompt Picker.app"
+tccutil reset Accessibility com.jonasgantner.promptpicker
+tccutil reset Accessibility com.prompt-picker.app
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/Prompt Picker.app"
+open "/Applications/Prompt Picker.app"
+```
+
+Then add `/Applications/Prompt Picker.app` again in **System Settings > Privacy & Security > Accessibility**. Local builds that rely on auto-paste should be signed with a stable identity; ad-hoc-signed rebuilds may create stale TCC entries.
 
 ## Launch at login
 
 Right-click the menubar icon and toggle **Launch at Login**. On macOS this writes or removes:
 
 ```
-~/Library/LaunchAgents/com.prompt-picker.app.plist
+~/Library/LaunchAgents/com.jonasgantner.promptpicker.plist
 ```
 
 The LaunchAgent starts the currently installed app binary at the next login. If you move or reinstall the app, toggle **Launch at Login** off and on once so the plist points at the current executable.
@@ -261,6 +286,7 @@ prompt-picker lives in your macOS menubar with no dock icon. Right-click the tra
 - **Reload** — rescans all prompt folders
 - **Launch at Login** — toggles the macOS LaunchAgent for automatic startup
 - **Copy Prompt Frontmatter Template** — copies a current `type: prompt` YAML template with lifecycle section metadata
+- **Copy Paste Diagnostics** — copies the current auto-paste permission and focus handoff state for troubleshooting
 - **Quit**
 
 ## License

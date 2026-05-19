@@ -2,8 +2,10 @@ mod config;
 mod indexer;
 mod resolver;
 
+use std::ffi::CStr;
+use std::os::raw::c_char;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -35,17 +37,124 @@ fn app_identifier() -> &'static str {
         serde_json::from_str::<serde_json::Value>(CONF)
             .ok()
             .and_then(|v| v["identifier"].as_str().map(String::from))
-            .unwrap_or_else(|| "com.prompt-picker.app".to_string())
+            .unwrap_or_else(|| "com.jonasgantner.promptpicker".to_string())
     })
 }
 
 /// PID of the app that was frontmost before we showed our window.
 static PREVIOUS_APP_PID: AtomicI32 = AtomicI32::new(-1);
+static LAST_PASTE_REPORT: OnceLock<Mutex<String>> = OnceLock::new();
+
+const PASTE_HANDOFF_DELAY_MS: u64 = 80;
+const PASTE_FOCUS_RETRY_MS: u64 = 20;
+const PASTE_FOCUS_TIMEOUT_MS: u64 = 1_000;
+
+#[derive(Debug, Clone)]
+struct PasteDiagnostics {
+    accessibility_trusted: bool,
+    app_identifier: String,
+    app_version: String,
+    executable: String,
+    previous_pid: i32,
+    previous_app: Option<String>,
+    frontmost_pid: Option<i32>,
+    frontmost_app: Option<String>,
+    last_paste_report: String,
+}
+
+fn last_paste_report_store() -> &'static Mutex<String> {
+    LAST_PASTE_REPORT.get_or_init(|| Mutex::new("No paste attempt recorded yet.".to_string()))
+}
+
+fn set_last_paste_report(report: String) {
+    if let Ok(mut value) = last_paste_report_store().lock() {
+        *value = report;
+    }
+}
+
+fn get_last_paste_report() -> String {
+    last_paste_report_store()
+        .lock()
+        .map(|value| value.clone())
+        .unwrap_or_else(|_| "Paste diagnostics lock was poisoned.".to_string())
+}
+
+fn paste_diagnostics() -> PasteDiagnostics {
+    let previous_pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
+
+    PasteDiagnostics {
+        accessibility_trusted: accessibility_trusted(),
+        app_identifier: app_identifier().to_string(),
+        app_version: app_version().to_string(),
+        executable: std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|e| format!("unknown: {e}")),
+        previous_pid,
+        previous_app: app_summary(previous_pid),
+        frontmost_pid: frontmost_pid(),
+        frontmost_app: frontmost_pid().and_then(app_summary),
+        last_paste_report: get_last_paste_report(),
+    }
+}
+
+fn paste_diagnostics_text() -> String {
+    let diagnostics = paste_diagnostics();
+    format!(
+        "Prompt Picker paste diagnostics\n\
+         app_identifier: {}\n\
+         app_version: {}\n\
+         executable: {}\n\
+         accessibility_trusted: {}\n\
+         previous_pid: {}\n\
+         previous_app: {}\n\
+         frontmost_pid: {}\n\
+         frontmost_app: {}\n\
+         launch_at_login_enabled: {}\n\n\
+         last_paste_report:\n{}",
+        diagnostics.app_identifier,
+        diagnostics.app_version,
+        diagnostics.executable,
+        diagnostics.accessibility_trusted,
+        diagnostics.previous_pid,
+        diagnostics
+            .previous_app
+            .unwrap_or_else(|| "unknown".to_string()),
+        diagnostics
+            .frontmost_pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        diagnostics
+            .frontmost_app
+            .unwrap_or_else(|| "unknown".to_string()),
+        launch_at_login_enabled(),
+        diagnostics.last_paste_report,
+    )
+}
 
 #[cfg(target_os = "macos")]
 mod macos_focus {
+    use super::*;
     use objc::runtime::{Class, Object};
     use objc::{msg_send, sel, sel_impl};
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrusted() -> u8;
+    }
+
+    fn nsstring_to_string(value: *mut Object) -> Option<String> {
+        if value.is_null() {
+            return None;
+        }
+
+        unsafe {
+            let ptr: *const c_char = msg_send![value, UTF8String];
+            if ptr.is_null() {
+                return None;
+            }
+            Some(CStr::from_ptr(ptr).to_string_lossy().into_owned())
+        }
+    }
 
     pub fn get_frontmost_pid() -> Option<i32> {
         unsafe {
@@ -60,20 +169,48 @@ mod macos_focus {
         }
     }
 
-    pub fn activate_pid(pid: i32) {
+    pub fn running_app_summary(pid: i32) -> Option<String> {
+        if pid <= 0 {
+            return None;
+        }
+
         unsafe {
-            if let Some(cls) = Class::get("NSRunningApplication") {
-                let app: *mut Object = msg_send![cls, runningApplicationWithProcessIdentifier: pid];
-                if !app.is_null() {
-                    // NSApplicationActivateAllWindows | NSApplicationActivateIgnoringOtherApps
-                    let _: bool = msg_send![app, activateWithOptions: 3u64];
-                }
+            let cls = Class::get("NSRunningApplication")?;
+            let app: *mut Object = msg_send![cls, runningApplicationWithProcessIdentifier: pid];
+            if app.is_null() {
+                return None;
             }
+
+            let name: *mut Object = msg_send![app, localizedName];
+            let bundle_id: *mut Object = msg_send![app, bundleIdentifier];
+            let name = nsstring_to_string(name).unwrap_or_else(|| "unknown app".to_string());
+            let bundle_id =
+                nsstring_to_string(bundle_id).unwrap_or_else(|| "unknown bundle".to_string());
+            Some(format!("{name} ({bundle_id})"))
+        }
+    }
+
+    pub fn is_accessibility_trusted() -> bool {
+        unsafe { AXIsProcessTrusted() != 0 }
+    }
+
+    pub fn activate_pid(pid: i32) -> bool {
+        unsafe {
+            let Some(cls) = Class::get("NSRunningApplication") else {
+                return false;
+            };
+            let app: *mut Object = msg_send![cls, runningApplicationWithProcessIdentifier: pid];
+            if app.is_null() {
+                return false;
+            }
+            // NSApplicationActivateAllWindows | NSApplicationActivateIgnoringOtherApps
+            let activated: bool = msg_send![app, activateWithOptions: 3u64];
+            activated
         }
     }
 
     /// Simulate Cmd+V keystroke via CGEvent to paste clipboard contents.
-    pub fn simulate_paste() {
+    pub fn simulate_paste() -> Result<(), String> {
         use core_graphics::event::{CGEvent, CGEventFlags, CGKeyCode};
         use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 
@@ -81,17 +218,55 @@ mod macos_focus {
         const KV_V: CGKeyCode = 9;
 
         let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
-            .expect("Failed to create CGEventSource");
+            .map_err(|e| format!("Failed to create CGEventSource: {e:?}"))?;
 
         let key_down = CGEvent::new_keyboard_event(source.clone(), KV_V, true)
-            .expect("Failed to create key down event");
+            .map_err(|e| format!("Failed to create key down event: {e:?}"))?;
         key_down.set_flags(CGEventFlags::CGEventFlagCommand);
         key_down.post(core_graphics::event::CGEventTapLocation::HID);
 
         let key_up = CGEvent::new_keyboard_event(source, KV_V, false)
-            .expect("Failed to create key up event");
+            .map_err(|e| format!("Failed to create key up event: {e:?}"))?;
         key_up.set_flags(CGEventFlags::CGEventFlagCommand);
         key_up.post(core_graphics::event::CGEventTapLocation::HID);
+        Ok(())
+    }
+}
+
+fn frontmost_pid() -> Option<i32> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_focus::get_frontmost_pid()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+fn app_summary(pid: i32) -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos_focus::running_app_summary(pid)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+fn accessibility_trusted() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos_focus::is_accessibility_trusted()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
     }
 }
 
@@ -387,7 +562,7 @@ fn restore_previous_focus() {
     {
         let pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
         if pid > 0 {
-            macos_focus::activate_pid(pid);
+            let _ = macos_focus::activate_pid(pid);
         }
     }
 }
@@ -399,19 +574,98 @@ fn paste_to_app(app: tauri::AppHandle, text: String) -> Result<(), String> {
         .write_text(text)
         .map_err(|e| e.to_string())?;
 
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.hide();
-    }
-
     #[cfg(target_os = "macos")]
     {
         let pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
-        if pid > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(80));
-            macos_focus::activate_pid(pid);
-            std::thread::sleep(std::time::Duration::from_millis(220));
-            macos_focus::simulate_paste();
-        }
+        let frontmost_at_command = macos_focus::get_frontmost_pid();
+        let trusted_at_command = macos_focus::is_accessibility_trusted();
+
+        std::thread::spawn(move || {
+            use std::time::{Duration, Instant};
+
+            let mut report = vec![
+                "deferred_paste: true".to_string(),
+                format!("paste_handoff_delay_ms: {PASTE_HANDOFF_DELAY_MS}"),
+                format!("accessibility_trusted_at_command: {trusted_at_command}"),
+                format!("previous_pid: {pid}"),
+                format!(
+                    "previous_app: {}",
+                    app_summary(pid).unwrap_or_else(|| "unknown".to_string())
+                ),
+                format!(
+                    "frontmost_at_command: {}",
+                    frontmost_at_command
+                        .map(|pid| format!(
+                            "{pid} {}",
+                            app_summary(pid).unwrap_or_else(|| "unknown".to_string())
+                        ))
+                        .unwrap_or_else(|| "unknown".to_string())
+                ),
+            ];
+
+            std::thread::sleep(Duration::from_millis(PASTE_HANDOFF_DELAY_MS));
+            let frontmost_after_delay = macos_focus::get_frontmost_pid();
+            let trusted_before_paste = macos_focus::is_accessibility_trusted();
+            report.push(format!(
+                "accessibility_trusted_before_paste: {trusted_before_paste}"
+            ));
+            report.push(format!(
+                "frontmost_after_delay: {}",
+                frontmost_after_delay
+                    .map(|pid| format!(
+                        "{pid} {}",
+                        app_summary(pid).unwrap_or_else(|| "unknown".to_string())
+                    ))
+                    .unwrap_or_else(|| "unknown".to_string())
+            ));
+
+            if pid > 0 {
+                let activated = macos_focus::activate_pid(pid);
+                report.push(format!("activate_previous_pid_returned: {activated}"));
+                let wait_started = Instant::now();
+                let deadline = wait_started + Duration::from_millis(PASTE_FOCUS_TIMEOUT_MS);
+                let mut frontmost_after = macos_focus::get_frontmost_pid();
+
+                while frontmost_after != Some(pid) && Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(PASTE_FOCUS_RETRY_MS));
+                    let _ = macos_focus::activate_pid(pid);
+                    frontmost_after = macos_focus::get_frontmost_pid();
+                }
+
+                report.push(format!(
+                    "focus_wait_elapsed_ms: {}",
+                    wait_started.elapsed().as_millis()
+                ));
+                report.push(format!(
+                    "frontmost_before_paste: {}",
+                    frontmost_after
+                        .map(|pid| format!(
+                            "{pid} {}",
+                            app_summary(pid).unwrap_or_else(|| "unknown".to_string())
+                        ))
+                        .unwrap_or_else(|| "unknown".to_string())
+                ));
+
+                if frontmost_after == Some(pid) {
+                    if trusted_before_paste {
+                        match macos_focus::simulate_paste() {
+                            Ok(()) => report.push("posted_cmd_v_event: true".to_string()),
+                            Err(e) => report.push(format!("posted_cmd_v_event_error: {e}")),
+                        }
+                    } else {
+                        report.push("skipped_paste: accessibility not trusted".to_string());
+                    }
+                } else {
+                    report.push("skipped_paste: previous app did not become frontmost".to_string());
+                }
+            } else {
+                report.push("skipped_paste: no previous pid captured".to_string());
+            }
+
+            let report = report.join("\n");
+            eprintln!("{report}");
+            set_last_paste_report(report);
+        });
     }
     Ok(())
 }
@@ -501,6 +755,13 @@ pub fn run() {
                 true,
                 None::<&str>,
             )?;
+            let copy_paste_diagnostics_i = MenuItem::with_id(
+                app,
+                "copy_paste_diagnostics",
+                "Copy Paste Diagnostics",
+                true,
+                None::<&str>,
+            )?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
@@ -510,6 +771,7 @@ pub fn run() {
                     &reload_i,
                     &launch_at_login_i,
                     &copy_frontmatter_i,
+                    &copy_paste_diagnostics_i,
                     &about_i,
                     &quit_i,
                 ],
@@ -557,6 +819,10 @@ pub fn run() {
                         use tauri_plugin_clipboard_manager::ClipboardExt;
                         let example = "---\ntype: prompt\nname: \"New prompt\"\nsection: start\nsection_name: Start\nsection_icon: play-circle\nsection_order: 10\norder: 10\ntags:\n  - agent\npinned: true\n---\n";
                         let _ = app.clipboard().write_text(example);
+                    }
+                    "copy_paste_diagnostics" => {
+                        use tauri_plugin_clipboard_manager::ClipboardExt;
+                        let _ = app.clipboard().write_text(paste_diagnostics_text());
                     }
                     "about" => {
                         let _ = open::that("https://github.com/jonasgantner/prompt-picker");
