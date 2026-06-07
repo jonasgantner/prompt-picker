@@ -1,4 +1,4 @@
-import { Component, useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
@@ -94,10 +94,32 @@ async function recordUsage(paths: string[]): Promise<void> {
   }
 }
 
-interface PreviewTarget {
-  path: string;
-  repo: string;
-  name: string;
+type PreviewTarget = Prompt;
+
+function promptKey(repo: string, path: string): string {
+  return `${repo}:${path}`;
+}
+
+function promptFallback(path: string, repo: string, name: string): Prompt {
+  return {
+    path,
+    repo,
+    name,
+    type: null,
+    tags: [],
+    pinned: false,
+    section: null,
+    sectionName: null,
+    sectionIcon: null,
+    sectionOrder: null,
+    order: null,
+    useWhen: null,
+    suggestedFollowUp: null,
+    alternatives: [],
+    extends: [],
+    hasExtends: false,
+    extendsCount: 0,
+  };
 }
 
 function AppContent() {
@@ -123,6 +145,13 @@ function AppContent() {
 
   const { sections, flatResults } = useSearch(prompts, searchText, usageData);
   const stagedPaths = new Set(stagedItems.map((i) => i.path));
+  const promptsByKey = useMemo(() => {
+    const byKey = new Map<string, Prompt>();
+    for (const prompt of prompts) {
+      byKey.set(promptKey(prompt.repo, prompt.path), prompt);
+    }
+    return byKey;
+  }, [prompts]);
 
   // Reset highlight when search changes
   useEffect(() => {
@@ -222,11 +251,20 @@ function AppContent() {
       target = flatResults[highlightIndex];
     } else if (focusContext === "staging" && stagedItems[stagingHighlight]) {
       const staged = stagedItems[stagingHighlight];
-      target = { path: staged.path, repo: staged.repo, name: staged.name };
+      target =
+        promptsByKey.get(promptKey(staged.repo, staged.path)) ??
+        promptFallback(staged.path, staged.repo, staged.name);
     }
 
     setPreviewTarget(target);
-  }, [focusContext, highlightIndex, stagingHighlight, stagedItems, flatResults]);
+  }, [
+    focusContext,
+    highlightIndex,
+    stagingHighlight,
+    stagedItems,
+    flatResults,
+    promptsByKey,
+  ]);
 
   // Load preview content whenever the selected preview target changes.
   useEffect(() => {

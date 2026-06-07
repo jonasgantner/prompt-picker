@@ -729,10 +729,14 @@ pub fn run() {
 
             let open_config_i =
                 MenuItem::with_id(app, "open_config", "Open Config", true, None::<&str>)?;
-            let open_prompts_i =
-                MenuItem::with_id(app, "open_prompts", "Open Prompt Folder", true, None::<&str>)?;
-            let reload_i =
-                MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
+            let open_prompts_i = MenuItem::with_id(
+                app,
+                "open_prompts",
+                "Open Prompt Folder",
+                true,
+                None::<&str>,
+            )?;
+            let reload_i = MenuItem::with_id(app, "reload", "Reload", true, None::<&str>)?;
             let launch_at_login_i = CheckMenuItem::with_id(
                 app,
                 "launch_at_login",
@@ -800,16 +804,13 @@ pub fn run() {
                         }
                         Err(e) => {
                             eprintln!("Failed to toggle Launch at Login: {e}");
-                            let _ = launch_at_login_item
-                                .set_checked(launch_at_login_enabled());
+                            let _ = launch_at_login_item.set_checked(launch_at_login_enabled());
                         }
                     },
                     "reload" => {
                         if let Ok(cfg) = config::load_config() {
                             let prompts = indexer::scan(&cfg);
-                            if let Some(state) =
-                                app_handle_for_reload.try_state::<AppState>()
-                            {
+                            if let Some(state) = app_handle_for_reload.try_state::<AppState>() {
                                 *state.prompts.lock().unwrap() = prompts.clone();
                                 let _ = app_handle_for_reload.emit("prompts-changed", &prompts);
                             }
@@ -817,7 +818,23 @@ pub fn run() {
                     }
                     "copy_frontmatter" => {
                         use tauri_plugin_clipboard_manager::ClipboardExt;
-                        let example = "---\ntype: prompt\nname: \"New prompt\"\nsection: start\nsection_name: Start\nsection_icon: play-circle\nsection_order: 10\norder: 10\ntags:\n  - agent\npinned: true\n---\n";
+                        let example = r#"---
+type: prompt
+name: "New prompt"
+section: start
+section_name: Start
+section_icon: play-circle
+section_order: 10
+order: 10
+use_when: "When this prompt should be used."
+suggested_follow_up: "What to run or do next."
+alternatives:
+  - "Related prompt name"
+tags:
+  - agent
+pinned: true
+---
+"#;
                         let _ = app.clipboard().write_text(example);
                     }
                     "copy_paste_diagnostics" => {
@@ -860,8 +877,7 @@ pub fn run() {
                         Ok(updater) => match updater.check().await {
                             Ok(Some(update)) => {
                                 println!("Update available: {}", update.version);
-                                if let Err(e) =
-                                    update.download_and_install(|_, _| {}, || {}).await
+                                if let Err(e) = update.download_and_install(|_, _| {}, || {}).await
                                 {
                                     eprintln!("Failed to install update: {e}");
                                 }

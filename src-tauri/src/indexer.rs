@@ -24,6 +24,11 @@ pub struct Prompt {
     #[serde(rename = "sectionOrder")]
     pub section_order: Option<i64>,
     pub order: Option<i64>,
+    #[serde(rename = "useWhen")]
+    pub use_when: Option<String>,
+    #[serde(rename = "suggestedFollowUp")]
+    pub suggested_follow_up: Option<String>,
+    pub alternatives: Vec<String>,
     pub extends: Vec<String>,
     #[serde(rename = "hasExtends")]
     pub has_extends: bool,
@@ -44,6 +49,9 @@ struct Frontmatter {
     section_icon: Option<String>,
     section_order: Option<i64>,
     order: Option<i64>,
+    use_when: Option<String>,
+    suggested_follow_up: Option<String>,
+    alternatives: Option<Vec<String>>,
 }
 
 /// Derive a display name from a filename: strip .md, replace - and _ with spaces, title-case
@@ -133,6 +141,9 @@ fn parse_prompt_file(repo_name: &str, repo_root: &Path, file_path: &Path) -> Opt
         section_icon: frontmatter.section_icon,
         section_order: frontmatter.section_order,
         order: frontmatter.order,
+        use_when: frontmatter.use_when,
+        suggested_follow_up: frontmatter.suggested_follow_up,
+        alternatives: frontmatter.alternatives.unwrap_or_default(),
         extends,
         has_extends,
         extends_count,

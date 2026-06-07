@@ -41,6 +41,10 @@ section_name: Review
 section_icon: shield
 section_order: 60
 order: 10
+use_when: "Use this when a plan needs a hard review before execution."
+suggested_follow_up: "Run Executable steps after fixing the plan."
+alternatives:
+  - "Adversarial critique"
 extends:
   - base/system-prompt.md
   - personas/mentor.md
@@ -65,6 +69,9 @@ performance, readability, and security...
 | `section_icon`  | Optional icon key for the section header, such as `play-circle`, `search`, `list-check`, or `shield`.             |
 | `section_order` | Numeric ordering between sections. Missing values sort after numbered sections, before `Other`.                   |
 | `order`         | Numeric ordering within a section. Missing values preserve alphabetical ordering by prompt name.                   |
+| `use_when`      | Short use case shown in the preview metadata area. It is not inserted into the final prompt body.                  |
+| `suggested_follow_up` | Optional next step shown in the preview metadata area.                                                     |
+| `alternatives`  | Optional list of related prompt names shown in the preview metadata area.                                         |
 
 Files without any frontmatter are still indexed and selectable — they just appear with lower priority in search results.
 
@@ -72,15 +79,14 @@ Files without any frontmatter are still indexed and selectable — they just app
 
 The picker does not require a fixed taxonomy, but this set keeps agent prompts easy to scan:
 
-| Section       | Key           | Order | Useful for                                      |
-| ------------- | ------------- | ----- | ----------------------------------------------- |
-| Start         | `start`       | `10`  | Intake, alignment, source selection             |
-| Investigate   | `investigate` | `20`  | Audits, source sweeps, deep research handoffs   |
-| Plan          | `plan`        | `30`  | Decisions, gates, executable plans              |
-| Execute       | `execute`     | `40`  | Confirmed agent work                            |
-| Finish        | `finish`      | `50`  | Verification, handoff, Linear cleanup           |
-| Review        | `review`      | `60`  | Critique, QA, assumption checks                 |
-| Meta          | `meta`        | `70`  | Session distillation, prompt/SOP improvement    |
+| Section  | Key        | Order | Useful for                                      |
+| -------- | ---------- | ----- | ----------------------------------------------- |
+| Start    | `start`    | `10`  | Intake, alignment, source selection             |
+| Research | `research` | `20`  | Source sweeps, deep research, system audits     |
+| Plan     | `plan`     | `30`  | Decisions, gates, executable plans              |
+| Work     | `work`     | `40`  | Confirmed agent work                            |
+| Finish   | `finish`   | `50`  | Verification, handoff, Linear cleanup, distill  |
+| Review   | `review`   | `60`  | Critique, QA, assumption checks                 |
 
 Use gaps of `10` for `section_order` and `order` so prompts can be inserted later without renumbering everything.
 
@@ -91,11 +97,11 @@ Obsidian can stay the source of truth for editing. A quick workflow:
 1. Right-click the Prompt Picker menubar icon and choose **Copy Prompt Frontmatter Template**.
 2. Choose **Open Prompt Folder** to jump to the configured prompt library.
 3. Create the markdown file in the right lifecycle folder.
-4. Paste the template, update `name`, `section`, `section_name`, `section_icon`, `section_order`, and `order`.
+4. Paste the template, update `name`, `section`, `section_name`, `section_icon`, `section_order`, `order`, `use_when`, `suggested_follow_up`, and `alternatives`.
 5. Write the prompt body below the closing `---`.
 6. Choose **Reload** from the tray menu if the file watcher has not picked it up yet.
 
-Keep `name` clean and human-readable. Put ordering in `section_order` and `order`, not in visible prompt names.
+Keep `name` clean and human-readable. Put ordering in `section_order` and `order`, not in visible prompt names. Put picker-only guidance in frontmatter, not in the body; inserted prompts should contain only the instructions the target agent should receive.
 
 ### Section ordering
 
@@ -111,7 +117,7 @@ Search results stay relevance-first: prefix match, contains match, fuzzy match, 
 
 ### Preview pane
 
-The picker shows a read-only preview pane on the right side of the window. It updates as you move through results with the arrow keys and displays the highlighted prompt body with frontmatter stripped.
+The picker shows a read-only preview pane on the right side of the window. It updates as you move through results with the arrow keys, shows compact frontmatter metadata at the top, and displays the highlighted prompt body with frontmatter stripped.
 
 Use `Cmd+Right` to focus the preview pane, `↑`/`↓` to scroll it, and `Cmd+Left` to return to the result list. Editing prompts in the preview pane is intentionally deferred; edit source markdown files in your editor or Obsidian.
 

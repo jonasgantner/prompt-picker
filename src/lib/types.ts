@@ -10,6 +10,9 @@ export interface Prompt {
   sectionIcon: string | null;
   sectionOrder: number | null;
   order: number | null;
+  useWhen: string | null;
+  suggestedFollowUp: string | null;
+  alternatives: string[];
   extends: string[];
   hasExtends: boolean;
   extendsCount: number;
