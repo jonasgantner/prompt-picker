@@ -9,6 +9,7 @@ interface UseKeyboardParams {
   searchText: string;
   highlightIndex: number;
   flatResults: Prompt[];
+  sectionJumpIndexes: number[];
   stagedItems: StagedItem[];
   stagingHighlight: number;
   showShortcuts: boolean;
@@ -33,6 +34,7 @@ export function useKeyboard({
   searchText,
   highlightIndex,
   flatResults,
+  sectionJumpIndexes,
   stagedItems,
   stagingHighlight,
   showShortcuts,
@@ -117,7 +119,14 @@ export function useKeyboard({
         switch (e.key) {
           case "ArrowDown": {
             e.preventDefault();
-            if (e.metaKey && stagedItems.length > 0) {
+            if (e.altKey && sectionJumpIndexes.length > 0) {
+              const nextSection = sectionJumpIndexes.find(
+                (index) => index > highlightIndex,
+              );
+              if (nextSection !== undefined) {
+                setHighlightIndex(nextSection);
+              }
+            } else if (e.metaKey && stagedItems.length > 0) {
               onSwitchToStaging();
             } else if (flatResults.length > 0) {
               setHighlightIndex(
@@ -135,7 +144,19 @@ export function useKeyboard({
           }
           case "ArrowUp": {
             e.preventDefault();
-            if (flatResults.length > 0) {
+            if (e.altKey && sectionJumpIndexes.length > 0) {
+              let previousSection: number | undefined;
+              for (const index of sectionJumpIndexes) {
+                if (index < highlightIndex) {
+                  previousSection = index;
+                } else {
+                  break;
+                }
+              }
+              if (previousSection !== undefined) {
+                setHighlightIndex(previousSection);
+              }
+            } else if (flatResults.length > 0) {
               setHighlightIndex(Math.max(highlightIndex - 1, 0));
             }
             break;
@@ -240,6 +261,7 @@ export function useKeyboard({
     searchText,
     highlightIndex,
     flatResults,
+    sectionJumpIndexes,
     stagedItems,
     stagingHighlight,
     showShortcuts,

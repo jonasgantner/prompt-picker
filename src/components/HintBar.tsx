@@ -49,6 +49,14 @@ export default function HintBar({
                 navigate
               </span>
             </span>
+            {searchText === "" && focusContext === "results" && (
+              <span className="flex items-center gap-1">
+                <KeyBadge label="⌥↑↓" />
+                <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  section
+                </span>
+              </span>
+            )}
             <span className="flex items-center gap-1">
               <KeyBadge label="tab" />
               <span className="text-[11px] text-neutral-500 dark:text-neutral-400">

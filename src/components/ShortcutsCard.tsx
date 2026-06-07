@@ -18,6 +18,7 @@ const sections = [
     title: "RESULTS",
     rows: [
       { key: "↑  ↓", desc: "Navigate results" },
+      { key: "Opt+↑  Opt+↓", desc: "Jump between sections" },
       { key: "Tab", desc: "Add to staging" },
       { key: "#keyword", desc: "Filter by tag" },
       { key: "Cmd+↓", desc: "Jump to staging area" },

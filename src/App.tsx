@@ -152,6 +152,23 @@ function AppContent() {
     }
     return byKey;
   }, [prompts]);
+  const sectionJumpIndexes = useMemo(() => {
+    if (searchText.trim()) {
+      return [];
+    }
+
+    const indexes: number[] = [];
+    let index = 0;
+    for (const section of sections) {
+      for (const group of section.groups) {
+        if (group.items.length > 0) {
+          indexes.push(index);
+          index += group.items.length;
+        }
+      }
+    }
+    return indexes;
+  }, [sections, searchText]);
 
   // Reset highlight when search changes
   useEffect(() => {
@@ -437,6 +454,7 @@ function AppContent() {
     searchText,
     highlightIndex,
     flatResults,
+    sectionJumpIndexes,
     stagedItems,
     stagingHighlight,
     showShortcuts,

@@ -212,6 +212,7 @@ The picker is designed to be used entirely from the keyboard. Press `?` with an 
 | Key              | Action                                                   |
 | ---------------- | -------------------------------------------------------- |
 | `↑` `↓`          | Navigate results                                         |
+| `Option+↑` `Option+↓` | Jump between visible sections                       |
 | `Tab`            | Add highlighted item to staging                          |
 | `#keyword`       | Filter by tag (type in search bar)                       |
 | `Cmd+↓`          | Jump to staging area                                     |
