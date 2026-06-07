@@ -12,7 +12,7 @@ import {
   pasteToApp,
   rescan,
   openConfig,
-  restorePreviousFocus,
+  hideAndRestoreFocus,
   getVersion,
 } from "./lib/commands";
 import type {
@@ -214,13 +214,15 @@ function AppContent() {
     }
   }, [prompts, stagedItems]);
 
-  // Focus search input when window gains focus
+  // Focus search input on show, and hide when the user clicks away.
   useEffect(() => {
     const appWindow = getCurrentWindow();
     const unlisten = appWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         setShowShortcuts(false);
         setTimeout(() => searchInputRef.current?.focus(), 50);
+      } else {
+        appWindow.hide();
       }
     });
     return () => {
@@ -393,8 +395,7 @@ function AppContent() {
     } else {
       // Copy only — restore focus without pasting
       await copyToClipboard(joined);
-      await restorePreviousFocus();
-      getCurrentWindow().hide();
+      await hideAndRestoreFocus();
     }
   }, [stagedItems, flatResults, highlightIndex]);
 
@@ -424,8 +425,7 @@ function AppContent() {
     setSearchText("");
     setChainErrors([]);
     setFocusContext("results");
-    await restorePreviousFocus();
-    getCurrentWindow().hide();
+    await hideAndRestoreFocus();
   }, [
     focusContext,
     stagedItems,

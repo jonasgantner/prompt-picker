@@ -48,6 +48,7 @@ static LAST_PASTE_REPORT: OnceLock<Mutex<String>> = OnceLock::new();
 const PASTE_HANDOFF_DELAY_MS: u64 = 80;
 const PASTE_FOCUS_RETRY_MS: u64 = 20;
 const PASTE_FOCUS_TIMEOUT_MS: u64 = 1_000;
+const CLOSE_FOCUS_RESTORE_DELAY_MS: u64 = 80;
 
 #[derive(Debug, Clone)]
 struct PasteDiagnostics {
@@ -270,6 +271,44 @@ fn accessibility_trusted() -> bool {
     }
 }
 
+fn restore_previous_app_focus() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
+        if pid > 0 {
+            return macos_focus::activate_pid(pid);
+        }
+        false
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+fn restore_previous_app_focus_after_close() {
+    let _ = restore_previous_app_focus();
+
+    #[cfg(target_os = "macos")]
+    {
+        let pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
+        if pid > 0 {
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(
+                    CLOSE_FOCUS_RESTORE_DELAY_MS,
+                ));
+                let _ = macos_focus::activate_pid(pid);
+            });
+        }
+    }
+}
+
+fn hide_window_and_restore_focus(window: &tauri::WebviewWindow) {
+    let _ = window.hide();
+    restore_previous_app_focus_after_close();
+}
+
 #[cfg(target_os = "macos")]
 mod macos_launch_agent {
     use std::path::PathBuf;
@@ -408,14 +447,7 @@ fn center_on_active_screen(window: &tauri::WebviewWindow) {
 fn toggle_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
-            let _ = window.hide();
-            #[cfg(target_os = "macos")]
-            {
-                let pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
-                if pid > 0 {
-                    macos_focus::activate_pid(pid);
-                }
-            }
+            hide_window_and_restore_focus(&window);
         } else {
             #[cfg(target_os = "macos")]
             {
@@ -558,12 +590,15 @@ fn get_version() -> String {
 
 #[tauri::command]
 fn restore_previous_focus() {
-    #[cfg(target_os = "macos")]
-    {
-        let pid = PREVIOUS_APP_PID.load(Ordering::Relaxed);
-        if pid > 0 {
-            let _ = macos_focus::activate_pid(pid);
-        }
+    restore_previous_app_focus_after_close();
+}
+
+#[tauri::command]
+fn hide_and_restore_focus(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        hide_window_and_restore_focus(&window);
+    } else {
+        restore_previous_app_focus_after_close();
     }
 }
 
@@ -710,6 +745,7 @@ pub fn run() {
             get_prompt_content,
             copy_to_clipboard,
             restore_previous_focus,
+            hide_and_restore_focus,
             paste_to_app,
             get_version
         ])

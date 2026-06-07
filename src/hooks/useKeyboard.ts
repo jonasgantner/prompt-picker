@@ -1,6 +1,5 @@
 import { useEffect } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { restorePreviousFocus } from "../lib/commands";
+import { hideAndRestoreFocus } from "../lib/commands";
 import type { Prompt, FocusContext } from "../lib/types";
 import type { StagedItem } from "../lib/staging";
 
@@ -94,8 +93,7 @@ export function useKeyboard({
         if (searchText) {
           setSearchText("");
         } else {
-          // Restore focus to previous app and hide
-          restorePreviousFocus().then(() => getCurrentWindow().hide());
+          hideAndRestoreFocus();
         }
         return;
       }

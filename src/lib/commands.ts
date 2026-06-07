@@ -43,6 +43,10 @@ export async function restorePreviousFocus(): Promise<void> {
   return invoke("restore_previous_focus");
 }
 
+export async function hideAndRestoreFocus(): Promise<void> {
+  return invoke("hide_and_restore_focus");
+}
+
 export async function getVersion(): Promise<string> {
   return invoke<string>("get_version");
 }
