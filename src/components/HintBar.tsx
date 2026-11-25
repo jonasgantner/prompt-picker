@@ -43,26 +43,45 @@ export default function HintBar({
           </span>
         ) : (
           <>
-            <span className="flex items-center gap-1">
-              <KeyBadge label="↑↓" />
-              <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                navigate
+            {focusContext === "preview" ? (
+              <>
+                <span className="flex items-center gap-1">
+                  <KeyBadge label="↑↓" />
+                  <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                    scroll
+                  </span>
+                </span>
+                <span className="flex items-center gap-1">
+                  <KeyBadge label="←" />
+                  <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                    list
+                  </span>
+                </span>
+              </>
+            ) : (
+              <span className="flex items-center gap-1">
+                <KeyBadge label="↑↓" />
+                <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  navigate
+                </span>
               </span>
-            </span>
+            )}
             {searchText === "" && focusContext === "results" && (
               <span className="flex items-center gap-1">
                 <KeyBadge label="⌥↑↓" />
                 <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                  section
+                  category
                 </span>
               </span>
             )}
-            <span className="flex items-center gap-1">
-              <KeyBadge label="tab" />
-              <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
-                add
+            {focusContext !== "preview" && (
+              <span className="flex items-center gap-1">
+                <KeyBadge label="tab" />
+                <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
+                  add
+                </span>
               </span>
-            </span>
+            )}
             {stagedCount > 0 && focusContext === "results" && (
               <span className="flex items-center gap-1">
                 <KeyBadge label="⌘↓" />
@@ -85,9 +104,9 @@ export default function HintBar({
                 insert
               </span>
             </span>
-            {hasPreview && (
+            {hasPreview && focusContext !== "preview" && (
               <span className="flex items-center gap-1">
-                <KeyBadge label="⌘→" />
+                <KeyBadge label="→" />
                 <span className="text-[11px] text-neutral-500 dark:text-neutral-400">
                   preview
                 </span>

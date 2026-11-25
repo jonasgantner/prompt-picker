@@ -7,7 +7,7 @@ use std::os::raw::c_char;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder,
 };
@@ -448,16 +448,27 @@ fn toggle_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         if window.is_visible().unwrap_or(false) {
             hide_window_and_restore_focus(&window);
-        } else {
+            return;
+        }
+    }
+    show_window(app);
+}
+
+fn show_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(false) {
             #[cfg(target_os = "macos")]
-            {
-                if let Some(pid) = macos_focus::get_frontmost_pid() {
-                    PREVIOUS_APP_PID.store(pid, Ordering::Relaxed);
-                }
+            if let Some(pid) = macos_focus::get_frontmost_pid() {
+                PREVIOUS_APP_PID.store(pid, Ordering::Relaxed);
             }
             center_on_active_screen(&window);
-            let _ = window.show();
-            let _ = window.set_focus();
+            if let Err(error) = window.show() {
+                eprintln!("Failed to open Prompt Picker: {error}");
+                return;
+            }
+        }
+        if let Err(error) = window.set_focus() {
+            eprintln!("Failed to focus Prompt Picker: {error}");
         }
     }
 }
@@ -545,12 +556,11 @@ fn get_prompts(state: tauri::State<'_, AppState>) -> Vec<indexer::Prompt> {
     state.prompts.lock().unwrap().clone()
 }
 
-#[tauri::command]
-fn rescan(state: tauri::State<'_, AppState>) -> Result<Vec<indexer::Prompt>, String> {
-    let cfg = config::load_config()?;
-    let prompts = indexer::scan(&cfg);
+fn publish_prompts(app: &tauri::AppHandle, config: &config::Config) {
+    let prompts = indexer::scan(config);
+    let state = app.state::<AppState>();
     *state.prompts.lock().unwrap() = prompts.clone();
-    Ok(prompts)
+    let _ = app.emit("prompts-changed", &prompts);
 }
 
 #[tauri::command]
@@ -706,7 +716,10 @@ fn paste_to_app(app: tauri::AppHandle, text: String) -> Result<(), String> {
 }
 
 pub fn run() {
-    let cfg = config::ensure_config().expect("Failed to load config");
+    let cfg = config::ensure_config().unwrap_or_else(|error| {
+        eprintln!("Failed to load config: {error}");
+        config::Config::default()
+    });
     let shortcut = parse_shortcut(&cfg.shortcut)
         .unwrap_or_else(|| Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyP));
 
@@ -740,7 +753,6 @@ pub fn run() {
             get_config,
             open_config,
             get_prompts,
-            rescan,
             get_resolved_chain,
             get_prompt_content,
             copy_to_clipboard,
@@ -761,14 +773,16 @@ pub fn run() {
                 .visible(false)
                 .build()?;
 
-            app.global_shortcut().register(shortcut)?;
+            if let Err(error) = app.global_shortcut().register(shortcut) {
+                eprintln!("Failed to register the global shortcut: {error}");
+            }
 
             let open_config_i =
-                MenuItem::with_id(app, "open_config", "Open Config", true, None::<&str>)?;
+                MenuItem::with_id(app, "open_config", "Settings…", true, None::<&str>)?;
             let open_prompts_i = MenuItem::with_id(
                 app,
                 "open_prompts",
-                "Open Prompt Folder",
+                "Open Prompts Folder",
                 true,
                 None::<&str>,
             )?;
@@ -776,54 +790,81 @@ pub fn run() {
             let launch_at_login_i = CheckMenuItem::with_id(
                 app,
                 "launch_at_login",
-                "Launch at Login",
-                true,
+                "Open at Login",
+                cfg!(target_os = "macos"),
                 launch_at_login_enabled(),
                 None::<&str>,
             )?;
             let about_i = MenuItem::with_id(
                 app,
                 "about",
-                &format!("About Prompt Picker v{}", app_version()),
+                &format!("About v{}", app_version()),
                 true,
                 None::<&str>,
             )?;
             let copy_frontmatter_i = MenuItem::with_id(
                 app,
                 "copy_frontmatter",
-                "Copy Prompt Frontmatter Template",
+                "Copy Prompt Template",
                 true,
                 None::<&str>,
             )?;
             let copy_paste_diagnostics_i = MenuItem::with_id(
                 app,
                 "copy_paste_diagnostics",
-                "Copy Paste Diagnostics",
+                "Copy Paste Report",
                 true,
                 None::<&str>,
             )?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(
+            let more_i = Submenu::with_items(
                 app,
+                "More",
+                true,
                 &[
-                    &open_config_i,
-                    &open_prompts_i,
                     &reload_i,
-                    &launch_at_login_i,
                     &copy_frontmatter_i,
                     &copy_paste_diagnostics_i,
                     &about_i,
-                    &quit_i,
                 ],
             )?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit Prompt Picker", true, None::<&str>)?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let menu = Menu::new(app)?;
+            #[cfg(target_os = "linux")]
+            {
+                let show_i = MenuItem::with_id(
+                    app,
+                    "show_picker",
+                    "Open Prompt Picker",
+                    true,
+                    None::<&str>,
+                )?;
+                menu.append(&show_i)?;
+            }
+            menu.append_items(&[&open_config_i, &open_prompts_i])?;
+            #[cfg(target_os = "macos")]
+            menu.append(&launch_at_login_i)?;
+            menu.append_items(&[&more_i, &separator, &quit_i])?;
 
-            let app_handle_for_reload = app.handle().clone();
             let launch_at_login_item = launch_at_login_i.clone();
-            let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            let tray = TrayIconBuilder::new().tooltip("Prompt Picker");
+            #[cfg(target_os = "macos")]
+            let tray = tray
+                .icon(tauri::image::Image::from_bytes(include_bytes!(
+                    "../icons/tray-template.png"
+                ))?)
+                .icon_as_template(true);
+            #[cfg(not(target_os = "macos"))]
+            let tray = tray.icon(
+                app.default_window_icon()
+                    .expect("A bundled app icon")
+                    .clone(),
+            );
+            let _tray = tray
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
+                    "show_picker" => show_window(app),
                     "open_config" => {
                         let _ = config::open_config_file();
                     }
@@ -845,22 +886,12 @@ pub fn run() {
                     },
                     "reload" => {
                         if let Ok(cfg) = config::load_config() {
-                            let prompts = indexer::scan(&cfg);
-                            if let Some(state) = app_handle_for_reload.try_state::<AppState>() {
-                                *state.prompts.lock().unwrap() = prompts.clone();
-                                let _ = app_handle_for_reload.emit("prompts-changed", &prompts);
-                            }
+                            publish_prompts(app, &cfg);
                         }
                     }
                     "copy_frontmatter" => {
                         use tauri_plugin_clipboard_manager::ClipboardExt;
                         let example = r#"---
-type: prompt
-name: "New prompt"
-section: start
-section_name: Start
-section_icon: play-circle
-section_order: 10
 order: 10
 use_when: "When this prompt should be used."
 suggested_follow_up: "What to run or do next."
@@ -894,14 +925,13 @@ pinned: true
                         ..
                     } = event
                     {
-                        toggle_window(tray.app_handle());
+                        show_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
 
             // Start watchers
-            config::watch_config(app.handle().clone());
-            indexer::watch_repos(&cfg, app.handle().clone());
+            indexer::watch_sources(cfg.clone(), app.handle().clone());
 
             // Background update check
             let handle = app.handle().clone();

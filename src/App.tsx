@@ -10,7 +10,6 @@ import {
   getConfig,
   copyToClipboard,
   pasteToApp,
-  rescan,
   openConfig,
   hideAndRestoreFocus,
   getVersion,
@@ -142,8 +141,13 @@ function AppContent() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const resetPreviewScroll = useCallback(() => {
+    if (previewRef.current) {
+      previewRef.current.scrollTop = 0;
+    }
+  }, []);
 
-  const { sections, flatResults } = useSearch(prompts, searchText, usageData);
+  const { categories, flatResults } = useSearch(prompts, searchText, usageData);
   const stagedPaths = new Set(stagedItems.map((i) => i.path));
   const promptsByKey = useMemo(() => {
     const byKey = new Map<string, Prompt>();
@@ -152,23 +156,21 @@ function AppContent() {
     }
     return byKey;
   }, [prompts]);
-  const sectionJumpIndexes = useMemo(() => {
+  const categoryJumpIndexes = useMemo(() => {
     if (searchText.trim()) {
       return [];
     }
 
     const indexes: number[] = [];
     let index = 0;
-    for (const section of sections) {
-      for (const group of section.groups) {
-        if (group.items.length > 0) {
-          indexes.push(index);
-          index += group.items.length;
-        }
+    for (const category of categories) {
+      if (category.items.length > 0) {
+        indexes.push(index);
+        index += category.items.length;
       }
     }
     return indexes;
-  }, [sections, searchText]);
+  }, [categories, searchText]);
 
   // Reset highlight when search changes
   useEffect(() => {
@@ -198,7 +200,6 @@ function AppContent() {
   useEffect(() => {
     const unlisten = listen<Config>("config-changed", (event) => {
       setConfig(event.payload);
-      rescan().then(setPrompts);
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -311,8 +312,19 @@ function AppContent() {
   useEffect(() => {
     if (focusContext === "preview") {
       previewRef.current?.focus();
+    } else if (focusContext === "results") {
+      searchInputRef.current?.focus();
     }
   }, [focusContext]);
+
+  useEffect(() => {
+    resetPreviewScroll();
+  }, [
+    previewTarget?.repo,
+    previewTarget?.path,
+    previewContent,
+    resetPreviewScroll,
+  ]);
 
   const handleToggleStage = useCallback(
     async (prompt: Prompt) => {
@@ -399,6 +411,24 @@ function AppContent() {
     }
   }, [stagedItems, flatResults, highlightIndex]);
 
+  const handleInsertPrompt = useCallback(async (prompt: Prompt) => {
+    const content = await getPromptContent(prompt.path, prompt.repo);
+    await recordUsage([prompt.path]);
+    setUsageData((prev) => ({
+      ...prev,
+      [prompt.path]: {
+        count: (prev[prompt.path]?.count ?? 0) + 1,
+        lastUsed: new Date().toISOString(),
+      },
+    }));
+    setStagedItems([]);
+    setSearchText("");
+    setChainErrors([]);
+    setFocusContext("results");
+    await pasteToApp(content);
+    getCurrentWindow().hide();
+  }, []);
+
   const handleCopyFocused = useCallback(async () => {
     const target =
       focusContext === "staging" && stagedItems[stagingHighlight]
@@ -454,7 +484,7 @@ function AppContent() {
     searchText,
     highlightIndex,
     flatResults,
-    sectionJumpIndexes,
+    categoryJumpIndexes,
     stagedItems,
     stagingHighlight,
     showShortcuts,
@@ -465,7 +495,10 @@ function AppContent() {
     onToggleStage: handleToggleStage,
     onCopyAndClose: handleCopyAndClose,
     onSwitchToStaging: () => setFocusContext("staging"),
-    onSwitchToResults: () => setFocusContext("results"),
+    onSwitchToResults: () => {
+      resetPreviewScroll();
+      setFocusContext("results");
+    },
     onSwitchToPreview: () => setFocusContext("preview"),
     onRemoveStaged: handleRemoveStaged,
     onReorder: handleReorder,
@@ -521,13 +554,12 @@ function AppContent() {
                   <EmptyState title="No prompts found in configured folders." />
                 ) : (
                   <ResultsList
-                    sections={sections}
+                    categories={categories}
                     flatResults={flatResults}
                     searchText={searchText}
                     highlightIndex={highlightIndex}
                     stagedPaths={stagedPaths}
-                    usageData={usageData}
-                    onSelect={handleToggleStage}
+                    onInsert={handleInsertPrompt}
                     onHighlight={setHighlightIndex}
                   />
                 )}

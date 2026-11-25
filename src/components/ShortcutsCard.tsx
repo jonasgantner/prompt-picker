@@ -11,14 +11,14 @@ const sections = [
       { key: "Esc", desc: "Clear search / close" },
       { key: "Enter", desc: "Insert into app & close" },
       { key: "Cmd+C", desc: "Copy focused prompt & close" },
-      { key: "Cmd+→", desc: "Focus preview" },
+      { key: "→", desc: "Focus preview" },
     ],
   },
   {
     title: "RESULTS",
     rows: [
       { key: "↑  ↓", desc: "Navigate results" },
-      { key: "Opt+↑  Opt+↓", desc: "Jump between sections" },
+      { key: "Opt+↑  Opt+↓", desc: "Jump between categories" },
       { key: "Tab", desc: "Add to staging" },
       { key: "#keyword", desc: "Filter by tag" },
       { key: "Cmd+↓", desc: "Jump to staging area" },
@@ -38,7 +38,7 @@ const sections = [
     rows: [
       { key: "↑  ↓", desc: "Scroll preview" },
       { key: "PageUp  PageDown", desc: "Scroll faster" },
-      { key: "Cmd+←", desc: "Return to results" },
+      { key: "←", desc: "Return to results" },
     ],
   },
 ];
