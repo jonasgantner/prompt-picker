@@ -16,6 +16,43 @@ You keep your prompts as `.md` files in one or more folders on disk. prompt-pick
 
 **Insert** — press `Enter`. All staged components are concatenated in order, frontmatter is stripped, and the result is pasted directly into the previously focused app. Press `Cmd+C` to copy the highlighted prompt body without pasting.
 
+### Try a two-part prompt
+
+Save these two files at the root of a folder configured under [Configuration](#configuration). If the new files do not appear in search, choose **Reload** from the menu bar icon.
+
+`review-format.md`
+
+```markdown
+---
+type: prompt
+name: Review format
+---
+List the most important finding first and include one concrete next step.
+```
+
+`pr-review.md`
+
+```markdown
+---
+type: prompt
+name: PR review
+extends: [review-format.md]
+---
+Review the diff below for correctness and missing edge cases.
+```
+
+Open a text editor, then open Prompt Picker with **⌘⇧P**. Search for **PR review**, press **Tab** to stage it, then press **Enter**. Prompt Picker assembles both bodies in order and returns the result to your editor. If macOS Accessibility permission is off, paste the result from the clipboard with **⌘V**.
+
+With the default separator, the result is:
+
+```text
+List the most important finding first and include one concrete next step.
+
+---
+
+Review the diff below for correctness and missing edge cases.
+```
+
 ### The extends system
 
 Prompts can declare dependencies on other prompts. A file like `code-review.md` can extend `base-system-prompt.md` and `mentor-persona.md`. When you select it, the full chain is assembled automatically:
