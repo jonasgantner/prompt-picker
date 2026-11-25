@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - ci/v0.2.1-bundles
   workflow_dispatch:
     inputs:
       tag:
@@ -15,7 +15,7 @@ jobs:
     permissions:
       contents: read
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_TAG: v0.2.1
     strategy:
       fail-fast: false
       matrix:
