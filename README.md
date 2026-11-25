@@ -18,7 +18,7 @@ You keep your prompts as `.md` files in one or more folders on disk. prompt-pick
 
 ### Try a two-part prompt
 
-Save these two files at the root of a folder configured under [Configuration](#configuration). If the new files do not appear in search, choose **Reload** from the menu bar icon.
+Save these two files at the root of a folder configured under [Configuration](#configuration). If the new files do not appear in search, right-click the menu bar icon and choose **More → Reload**.
 
 `review-format.md`
 
@@ -71,12 +71,6 @@ prompt-picker uses standard YAML frontmatter that's fully compatible with Obsidi
 
 ```yaml
 ---
-type: prompt
-name: "Code review expert"
-section: review
-section_name: Review
-section_icon: shield
-section_order: 60
 order: 10
 use_when: "Use this when a plan needs a hard review before execution."
 suggested_follow_up: "Run Executable steps after fixing the plan."
@@ -96,73 +90,110 @@ performance, readability, and security...
 
 | Field           | Description                                                                                                       |
 | --------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `type: prompt`  | Marks the file as a first-class prompt (prioritized in search). Files without this still work, just ranked lower. |
-| `name`          | Display name in the picker. Falls back to the filename if not set.                                                |
+| `name`          | Optional fallback display name when the filename is still `Untitled` or otherwise not useful. Usually omit it.    |
+| `type: prompt`  | Optional legacy/root-file marker. Files inside configured section folders are treated as prompts automatically.    |
 | `extends`       | Ordered list of file paths (relative to repo root) that get auto-included when this prompt is selected.           |
 | `tags`          | Filterable tags. Search with `#tagname` in the picker. Obsidian-compatible format.                                |
-| `pinned`        | Shows the prompt in the Pinned section at the top of the picker.                                                  |
-| `section`       | Stable machine key for lifecycle grouping, such as `start`, `plan`, or `review`.                                  |
-| `section_name`  | Human label shown for grouped section headers. Falls back to a title-cased `section`.                             |
-| `section_icon`  | Optional icon key for the section header, such as `play-circle`, `search`, `list-check`, or `shield`.             |
-| `section_order` | Numeric ordering between sections. Missing values sort after numbered sections, before `Other`.                   |
-| `order`         | Numeric ordering within a section. Missing values preserve alphabetical ordering by prompt name.                   |
+| `pinned`        | Sorts the prompt first inside its category and marks it with a compact pin badge.                                 |
+| `order`         | Numeric ordering within the prompt's folder-derived section. Missing values preserve alphabetical ordering by prompt name. |
 | `use_when`      | Short use case shown in the preview metadata area. It is not inserted into the final prompt body.                  |
 | `suggested_follow_up` | Optional next step shown in the preview metadata area.                                                     |
 | `alternatives`  | Optional list of related prompt names shown in the preview metadata area.                                         |
 
-Files without any frontmatter are still indexed and selectable — they just appear with lower priority in search results.
+Files without any frontmatter are still indexed and selectable. Files inside configured section folders are treated as first-class prompts automatically.
+
+### Section file
+
+Sections are collection-level metadata. Put them in `prompt-picker.toml` at the root of a prompt repository:
+
+```toml
+ignore = ["README.md"]
+
+[[sections]]
+folder = "01-start"
+key = "start"
+name = "Start"
+icon = "play-circle"
+order = 10
+
+[[sections]]
+folder = "02-work"
+key = "work"
+name = "Work"
+icon = "list-check"
+order = 20
+
+[[sections]]
+folder = "03-close"
+key = "close"
+name = "Close"
+icon = "check-circle"
+order = 30
+```
+
+Prompt files join a section by living in that folder. For example, `01-start/shape.md` belongs to `start`; the prompt file does not need `section`, `section_name`, `section_icon`, or `section_order` frontmatter.
+
+A new `.md` file created inside a configured section folder appears in the picker as soon as the file watcher sees it. Its filename is the prompt name; `name:` frontmatter is only a fallback for placeholder filenames such as `Untitled.md`.
+
+If a folder is not listed in `prompt-picker.toml`, prompt-picker derives a section from the folder name by stripping a leading numeric prefix. For example, `02-review` becomes key `review`, label `Review`, and order `2`.
+
+Older prompt libraries that still use `section`, `section_name`, `section_icon`, or `section_order` in prompt frontmatter continue to work as a fallback.
 
 ### Recommended lifecycle sections
 
 The picker does not require a fixed taxonomy, but this set keeps agent prompts easy to scan:
 
-| Section  | Key        | Order | Useful for                                      |
-| -------- | ---------- | ----- | ----------------------------------------------- |
-| Start    | `start`    | `10`  | Intake, alignment, source selection             |
-| Research | `research` | `20`  | Source sweeps, deep research, system audits     |
-| Plan     | `plan`     | `30`  | Decisions, gates, executable plans              |
-| Work     | `work`     | `40`  | Confirmed agent work                            |
-| Finish   | `finish`   | `50`  | Verification, handoff, Linear cleanup, distill  |
-| Review   | `review`   | `60`  | Critique, QA, assumption checks                 |
+| Section  | Folder          | Key        | Useful for                                      |
+| -------- | --------------- | ---------- | ----------------------------------------------- |
+| Start    | `01-start`      | `start`    | Intake, alignment, source selection             |
+| Research | `02-research`   | `research` | Source sweeps, deep research, system audits     |
+| Plan     | `03-plan`       | `plan`     | Decisions, gates, executable plans              |
+| Work     | `04-work`       | `work`     | Confirmed agent work                            |
+| Finish   | `05-finish`     | `finish`   | Verification, handoff, Linear cleanup, distill  |
+| Review   | `06-review`     | `review`   | Critique, QA, assumption checks                 |
 
-Use gaps of `10` for `section_order` and `order` so prompts can be inserted later without renumbering everything.
+Use gaps of `10` for manifest `order` and prompt `order` so sections and prompts can be inserted later without renumbering everything.
 
 ### Creating prompts in Obsidian
 
 Obsidian can stay the source of truth for editing. A quick workflow:
 
-1. Right-click the Prompt Picker menubar icon and choose **Copy Prompt Frontmatter Template**.
-2. Choose **Open Prompt Folder** to jump to the configured prompt library.
+1. Right-click the Prompt Picker menu bar icon and choose **More → Copy Prompt Template**.
+2. Choose **Open Prompts Folder** to jump to the configured prompt library.
 3. Create the markdown file in the right lifecycle folder.
-4. Paste the template, update `name`, `section`, `section_name`, `section_icon`, `section_order`, `order`, `use_when`, `suggested_follow_up`, and `alternatives`.
+4. Paste the template, update `order`, `use_when`, `suggested_follow_up`, and `alternatives`.
 5. Write the prompt body below the closing `---`.
-6. Choose **Reload** from the tray menu if the file watcher has not picked it up yet.
+6. Choose **More → Reload** if the file watcher has not picked it up yet.
 
-Keep `name` clean and human-readable. Put ordering in `section_order` and `order`, not in visible prompt names. Put picker-only guidance in frontmatter, not in the body; inserted prompts should contain only the instructions the target agent should receive.
+Keep filenames clean and human-readable, because the filename is the prompt name in the picker. Put section labels/icons/order in `prompt-picker.toml`, not in each prompt file. Put picker-only guidance in frontmatter, not in the body; inserted prompts should contain only the instructions the target agent should receive.
 
-### Section ordering
+### Category ordering
 
-The home view keeps the existing top-level buckets:
+The home view is category-first. It renders lifecycle categories directly, such as **Start**, **Work**, and **Close**, rather than wrapping everything in separate Pinned/Frequent/All buckets.
 
-1. **Pinned**
-2. **Frequent**
-3. **All prompts**
+Prompts are grouped by their first folder under the configured prompt repository. Categories sort by manifest `order`, then derived folder order, then label. Prompts inside a category sort by:
 
-Inside each bucket, prompt-type items are grouped by `section`. Sections sort by `section_order`, then `section_name`. Prompts inside a section sort by `order`, then `name`. Plain markdown files and prompts without a section fall into **Other** at the end.
+1. `pinned: true`
+2. prompt classification, which is automatic for files inside configured section folders
+3. `order`
+4. usage count
+5. `name`
 
-Search results stay relevance-first: prefix match, contains match, fuzzy match, with pinned and `type: prompt` boosts preserved. Section labels may appear as compact badges, but grouping does not override search relevance.
+Plain markdown files at the repository root fall into **Other** at the end unless ignored by `prompt-picker.toml`. Search results stay relevance-first: prefix match, contains match, fuzzy match, with pinned and automatic prompt classification boosts preserved. Category labels appear as compact badges, but grouping does not override search relevance.
 
 ### Preview pane
 
 The picker shows a read-only preview pane on the right side of the window. It updates as you move through results with the arrow keys, shows compact frontmatter metadata at the top, and displays the highlighted prompt body with frontmatter stripped.
 
-Use `Cmd+Right` to focus the preview pane, `↑`/`↓` to scroll it, and `Cmd+Left` to return to the result list. Editing prompts in the preview pane is intentionally deferred; edit source markdown files in your editor or Obsidian.
+Use `Right` to focus the preview pane, `↑`/`↓` to scroll it, and `Left` to return to the result list. Editing prompts in the preview pane is intentionally deferred; edit source markdown files in your editor or Obsidian.
 
 ## Installation
 
 ### From releases
 
-Download the latest `.dmg` from [Releases](../../releases), open it, and drag prompt-picker to your Applications folder.
+Download the `aarch64.dmg` for Apple silicon or the `x64.dmg` for Intel from [Releases](../../releases). Open the disk image and drag **Prompt Picker** to **Applications**.
+
+The macOS download is ad hoc signed and is distributed without Apple notarization. Try opening the app once. If macOS blocks it because the developer cannot be verified, go to **System Settings → Privacy & Security → Open Anyway**, then confirm **Open**. [Apple’s first-launch guide](https://support.apple.com/en-us/102445)
 
 ### From source
 
@@ -176,7 +207,7 @@ Requirements:
 git clone https://github.com/jonasgantner/prompt-picker.git
 cd prompt-picker
 bun install
-bun tauri build
+bun tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
 The built `.app` and `.dmg` will be in `src-tauri/target/release/bundle/`.
@@ -241,15 +272,15 @@ The picker is designed to be used entirely from the keyboard. Press `?` with an 
 | `Esc`            | Clear search (first press) / close window (second press) |
 | `Enter`          | Insert into previous app and close                       |
 | `Cmd+C`          | Copy highlighted prompt body and close                   |
-| `Cmd+Right`      | Focus the preview pane                                   |
-| `Cmd+Left`       | Return focus from preview to results                     |
+| `Right`          | Focus the preview pane                                   |
+| `Left`           | Return focus from preview to results                     |
 
 **Results**
 
 | Key              | Action                                                   |
 | ---------------- | -------------------------------------------------------- |
 | `↑` `↓`          | Navigate results                                         |
-| `Option+↑` `Option+↓` | Jump between visible sections                       |
+| `Option+↑` `Option+↓` | Jump between visible categories                     |
 | `Tab`            | Add highlighted item to staging                          |
 | `#keyword`       | Filter by tag (type in search bar)                       |
 | `Cmd+↓`          | Jump to staging area                                     |
@@ -269,7 +300,7 @@ The picker is designed to be used entirely from the keyboard. Press `?` with an 
 | ---------------- | -------------------------------------------------------- |
 | `↑` `↓`          | Scroll preview while preview has focus                   |
 | `PageUp` `PageDown` | Scroll preview by a larger step                       |
-| `Cmd+Left`       | Return to results                                        |
+| `Left`           | Return to results                                        |
 
 ## Permissions
 
@@ -277,40 +308,23 @@ prompt-picker requires the following macOS permissions:
 
 - **Accessibility** — needed for the auto-paste feature (`Enter` to paste). The app simulates a `Cmd+V` keystroke in the previously focused app, which requires accessibility access. Grant it in **System Settings > Privacy & Security > Accessibility**. Without this permission, `Enter` will copy to clipboard but the paste won't go through.
 
-If `Enter` copies the prompt but does not insert it, use the tray menu item **Copy Paste Diagnostics**. The important line is `accessibility_trusted: true`.
-
-For stale or duplicate Accessibility entries:
-
-```bash
-osascript -e 'tell application id "com.jonasgantner.promptpicker" to quit' -e 'tell application "System Settings" to quit'
-xattr -rd com.apple.quarantine "/Applications/Prompt Picker.app"
-tccutil reset Accessibility com.jonasgantner.promptpicker
-tccutil reset Accessibility com.prompt-picker.app
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/Prompt Picker.app"
-open "/Applications/Prompt Picker.app"
-```
-
-Then add `/Applications/Prompt Picker.app` again in **System Settings > Privacy & Security > Accessibility**. Local builds that rely on auto-paste should be signed with a stable identity; ad-hoc-signed rebuilds may create stale TCC entries.
+If **Enter** copies the prompt without inserting it, choose **More → Copy Paste Report** from the menu bar menu and check `accessibility_trusted`. After an update, you may need to remove the old Prompt Picker entry and add the current app again in **System Settings → Privacy & Security → Accessibility**.
 
 ## Launch at login
 
-Right-click the menubar icon and toggle **Launch at Login**. On macOS this writes or removes:
+Right-click the menu bar icon and toggle **Open at Login**. On macOS this manages the LaunchAgent at:
 
 ```
 ~/Library/LaunchAgents/com.jonasgantner.promptpicker.plist
 ```
 
-The LaunchAgent starts the currently installed app binary at the next login. If you move or reinstall the app, toggle **Launch at Login** off and on once so the plist points at the current executable.
+The LaunchAgent starts the app at the next login. If you move the app, toggle **Open at Login** off and on so it points to the new location.
 
 ## How prompts are organized
 
-prompt-picker scans all `.md` files recursively in your configured folders. It groups them into three tiers:
+prompt-picker scans `.md` files recursively in your configured folders. The home view groups prompts by the first folder under each prompt repository, with optional section metadata from `prompt-picker.toml`. Pinned prompts sort first inside their category, frequently used prompts get a small ranking boost, and uncategorized root files appear in **Other**.
 
-1. **Pinned** — prompts with `pinned: true` in frontmatter. Always at the top.
-2. **Frequent** — automatically tracked by usage count. The more you use a prompt, the higher it ranks.
-3. **All prompts** — everything else, with typed prompts (`type: prompt`) shown before plain markdown files.
-
-When you search, all tiers collapse into a single ranked list.
+When you search, categories collapse into a single ranked list with compact category badges.
 
 ## Tech stack
 
@@ -323,16 +337,12 @@ The app is ~5 MB, uses no Chromium, and has near-zero idle resource usage.
 
 ## Tray icon
 
-prompt-picker lives in your macOS menubar with no dock icon. Right-click the tray icon for:
+Left-click the monochrome menu bar icon to open Prompt Picker. Right-click for **Settings**, **Open Prompts Folder**, **Open at Login**, and **Quit Prompt Picker**. The **More** submenu contains **Reload**, **Copy Prompt Template**, **Copy Paste Report**, and the version.
 
-- **Open config** — opens `config.toml` in your default editor
-- **Open Prompt Folder** — opens the first configured prompt folder
-- **Reload** — rescans all prompt folders
-- **Launch at Login** — toggles the macOS LaunchAgent for automatic startup
-- **Copy Prompt Frontmatter Template** — copies a current `type: prompt` YAML template with lifecycle section metadata
-- **Copy Paste Diagnostics** — copies the current auto-paste permission and focus handoff state for troubleshooting
-- **Quit**
+## Authors
+
+[Jonas Gantner](https://github.com/jonasgantner) and [Maxim Kopecki](https://github.com/mkopecki).
 
 ## License
 
-MIT
+[MIT](LICENSE)

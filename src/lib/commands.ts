@@ -13,10 +13,6 @@ export async function getPrompts(): Promise<Prompt[]> {
   return invoke<Prompt[]>("get_prompts");
 }
 
-export async function rescan(): Promise<Prompt[]> {
-  return invoke<Prompt[]>("rescan");
-}
-
 export async function getResolvedChain(
   path: string,
   repo: string,

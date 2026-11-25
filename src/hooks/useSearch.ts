@@ -1,12 +1,7 @@
 import { useMemo } from "react";
 import type { Prompt, UsageData } from "../lib/types";
 
-export interface Section {
-  title: string;
-  groups: PromptGroup[];
-}
-
-export interface PromptGroup {
+export interface CategoryGroup {
   key: string;
   title: string;
   icon: string | null;
@@ -14,9 +9,11 @@ export interface PromptGroup {
 }
 
 interface SearchResult {
-  sections: Section[];
+  categories: CategoryGroup[];
   flatResults: Prompt[];
 }
+
+const OTHER_CATEGORY_KEY = "__other";
 
 function fuzzyMatch(text: string, query: string): boolean {
   let qi = 0;
@@ -56,11 +53,15 @@ function titleCase(value: string): string {
     .join(" ");
 }
 
-function sectionLabel(prompt: Prompt): string {
+function categoryKey(prompt: Prompt): string {
+  return prompt.section || OTHER_CATEGORY_KEY;
+}
+
+function categoryLabel(prompt: Prompt): string {
   return prompt.sectionName || (prompt.section ? titleCase(prompt.section) : "Other");
 }
 
-function sectionSortValue(prompt: Prompt): number {
+function categorySortValue(prompt: Prompt): number {
   if (prompt.section) return prompt.sectionOrder ?? Number.MAX_SAFE_INTEGER - 1;
   return Number.MAX_SAFE_INTEGER;
 }
@@ -69,45 +70,72 @@ function promptSortValue(prompt: Prompt): number {
   return prompt.order ?? Number.MAX_SAFE_INTEGER;
 }
 
-function comparePromptsInSection(a: Prompt, b: Prompt): number {
+function compareHomePrompts(
+  a: Prompt,
+  b: Prompt,
+  usageData: UsageData,
+): number {
+  if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+
+  const aFirstClass = a.type === "prompt";
+  const bFirstClass = b.type === "prompt";
+  if (aFirstClass !== bFirstClass) return aFirstClass ? -1 : 1;
+
   const orderDiff = promptSortValue(a) - promptSortValue(b);
   if (orderDiff !== 0) return orderDiff;
+
+  const usageDiff = getUsageCount(b.path, usageData) - getUsageCount(a.path, usageData);
+  if (usageDiff !== 0) return usageDiff;
+
   return a.name.localeCompare(b.name);
 }
 
-function groupByPromptSection(items: Prompt[]): PromptGroup[] {
-  const groups = new Map<string, PromptGroup & { sectionOrder: number }>();
+function buildHomeCategories(
+  prompts: Prompt[],
+  usageData: UsageData,
+): SearchResult {
+  const groups = new Map<string, Prompt[]>();
 
-  for (const prompt of items) {
-    const key = prompt.section || "__other";
+  for (const prompt of prompts) {
+    const key = categoryKey(prompt);
     const existing = groups.get(key);
     if (existing) {
-      existing.items.push(prompt);
-      if (prompt.sectionIcon && !existing.icon) {
-        existing.icon = prompt.sectionIcon;
-      }
-      existing.sectionOrder = Math.min(existing.sectionOrder, sectionSortValue(prompt));
+      existing.push(prompt);
     } else {
-      groups.set(key, {
-        key,
-        title: sectionLabel(prompt),
-        icon: prompt.sectionIcon,
-        items: [prompt],
-        sectionOrder: sectionSortValue(prompt),
-      });
+      groups.set(key, [prompt]);
     }
   }
 
-  return Array.from(groups.values())
+  const categories = Array.from(groups.entries())
+    .map(([key, items]) => {
+      const sortedItems = items
+        .slice()
+        .sort((a, b) => compareHomePrompts(a, b, usageData));
+      const representative =
+        sortedItems.find(
+          (prompt) =>
+            prompt.sectionName || prompt.sectionIcon || prompt.sectionOrder !== null,
+        ) ?? sortedItems[0];
+      const categoryOrder = Math.min(...items.map(categorySortValue));
+
+      return {
+        key,
+        title: representative ? categoryLabel(representative) : "Other",
+        icon:
+          sortedItems.find((prompt) => prompt.sectionIcon)?.sectionIcon ?? null,
+        items: sortedItems,
+        categoryOrder,
+      };
+    })
     .sort((a, b) => {
-      const orderDiff = a.sectionOrder - b.sectionOrder;
+      const orderDiff = a.categoryOrder - b.categoryOrder;
       if (orderDiff !== 0) return orderDiff;
       return a.title.localeCompare(b.title);
     })
-    .map(({ sectionOrder: _sectionOrder, ...group }) => ({
-      ...group,
-      items: group.items.slice().sort(comparePromptsInSection),
-    }));
+    .map(({ categoryOrder: _categoryOrder, ...group }) => group);
+
+  const flatResults = categories.flatMap((category) => category.items);
+  return { categories, flatResults };
 }
 
 export function useSearch(
@@ -117,65 +145,10 @@ export function useSearch(
 ): SearchResult {
   return useMemo(() => {
     if (!searchText.trim()) {
-      return buildHomeSections(prompts, usageData);
+      return buildHomeCategories(prompts, usageData);
     }
     return buildSearchResults(prompts, searchText, usageData);
   }, [prompts, searchText, usageData]);
-}
-
-function buildHomeSections(
-  prompts: Prompt[],
-  usageData: UsageData,
-): SearchResult {
-  const sections: Section[] = [];
-  const pinnedSet = new Set<string>();
-  const frequentSet = new Set<string>();
-
-  // PINNED
-  const pinned = prompts
-    .filter((p) => p.pinned)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  if (pinned.length > 0) {
-    sections.push({ title: "PINNED", groups: groupByPromptSection(pinned) });
-    pinned.forEach((p) => pinnedSet.add(p.path));
-  }
-
-  // FREQUENT
-  const frequent = prompts
-    .filter((p) => !pinnedSet.has(p.path) && getUsageCount(p.path, usageData) > 0)
-    .sort((a, b) => {
-      const countDiff =
-        getUsageCount(b.path, usageData) - getUsageCount(a.path, usageData);
-      if (countDiff !== 0) return countDiff;
-      const aLast = usageData[a.path]?.lastUsed ?? "";
-      const bLast = usageData[b.path]?.lastUsed ?? "";
-      return bLast.localeCompare(aLast);
-    })
-    .slice(0, 5);
-  if (frequent.length > 0) {
-    sections.push({ title: "FREQUENT", groups: groupByPromptSection(frequent) });
-    frequent.forEach((p) => frequentSet.add(p.path));
-  }
-
-  // ALL PROMPTS
-  const remaining = prompts.filter(
-    (p) => !pinnedSet.has(p.path) && !frequentSet.has(p.path),
-  );
-  const firstClass = remaining
-    .filter((p) => p.type === "prompt")
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const plain = remaining
-    .filter((p) => p.type !== "prompt")
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const allItems = [...firstClass, ...plain];
-  if (allItems.length > 0) {
-    sections.push({ title: "ALL PROMPTS", groups: groupByPromptSection(allItems) });
-  }
-
-  const flatResults = sections.flatMap((s) =>
-    s.groups.flatMap((group) => group.items),
-  );
-  return { sections, flatResults };
 }
 
 function buildSearchResults(
@@ -187,7 +160,6 @@ function buildSearchResults(
 
   let candidates = prompts;
 
-  // Tag filtering
   if (tagQuery) {
     const lowerTag = tagQuery.toLowerCase();
     candidates = candidates.filter((p) =>
@@ -195,7 +167,6 @@ function buildSearchResults(
     );
   }
 
-  // Name ranking
   interface Ranked {
     prompt: Prompt;
     tier: number;
@@ -206,7 +177,7 @@ function buildSearchResults(
   const lowerName = nameQuery.toLowerCase();
 
   for (const p of candidates) {
-    let tier = 4; // no match
+    let tier = 4;
 
     if (nameQuery) {
       const pName = p.name.toLowerCase();
@@ -219,10 +190,10 @@ function buildSearchResults(
       } else if (fuzzyMatch(pName, nameQuery) || fuzzyMatch(pPath, nameQuery)) {
         tier = 3;
       } else {
-        continue; // no match at all
+        continue;
       }
     } else {
-      tier = 1; // tag-only search, all tag matches are tier 1
+      tier = 1;
     }
 
     const matchedTag = tagQuery
@@ -232,23 +203,21 @@ function buildSearchResults(
     ranked.push({ prompt: p, tier, matchedTag });
   }
 
-  // Sort within tiers
   ranked.sort((a, b) => {
     if (a.tier !== b.tier) return a.tier - b.tier;
-    // Pinned first
     if (a.prompt.pinned !== b.prompt.pinned) return a.prompt.pinned ? -1 : 1;
-    // First-class first
+
     const aFirst = a.prompt.type === "prompt";
     const bFirst = b.prompt.type === "prompt";
     if (aFirst !== bFirst) return aFirst ? -1 : 1;
-    // Higher usage
+
     const aCount = getUsageCount(a.prompt.path, usageData);
     const bCount = getUsageCount(b.prompt.path, usageData);
     if (aCount !== bCount) return bCount - aCount;
-    // Alphabetical
+
     return a.prompt.name.localeCompare(b.prompt.name);
   });
 
   const flatResults = ranked.map((r) => r.prompt);
-  return { sections: [], flatResults };
+  return { categories: [], flatResults };
 }

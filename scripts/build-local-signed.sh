@@ -7,6 +7,7 @@ IDENTITY="${PROMPT_PICKER_SIGNING_IDENTITY:-Prompt Picker Local Code Signing}"
 
 cd "$ROOT_DIR"
 
-PATH="$HOME/.cargo/bin:$PATH" bun run tauri build --bundles app --config \
-  "{\"bundle\":{\"macOS\":{\"signingIdentity\":\"$IDENTITY\",\"hardenedRuntime\":false}}}"
+CONFIG="{\"bundle\":{\"createUpdaterArtifacts\":false,\"macOS\":{\"signingIdentity\":\"$IDENTITY\",\"hardenedRuntime\":false}}}"
 
+PATH="$HOME/.cargo/bin:$PATH" bun run tauri build --bundles app --config \
+  "$CONFIG"

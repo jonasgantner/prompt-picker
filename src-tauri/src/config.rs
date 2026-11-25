@@ -1,10 +1,6 @@
-use notify_debouncer_mini::new_debouncer;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::Duration;
-use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -14,6 +10,16 @@ pub struct Config {
     pub separator: String,
     #[serde(default)]
     pub repos: Vec<Repo>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            shortcut: default_shortcut(),
+            separator: default_separator(),
+            repos: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,49 +103,6 @@ pub fn ensure_config() -> Result<Config, String> {
     load_config()
 }
 
-pub fn watch_config(app_handle: AppHandle) {
-    let path = config_path();
-    std::thread::spawn(move || {
-        let (tx, rx) = mpsc::channel();
-        let mut debouncer =
-            new_debouncer(Duration::from_millis(500), tx).expect("Failed to create config watcher");
-
-        debouncer
-            .watcher()
-            .watch(path.parent().unwrap(), notify::RecursiveMode::NonRecursive)
-            .expect("Failed to watch config directory");
-
-        // Keep debouncer alive and process events
-        loop {
-            match rx.recv() {
-                Ok(Ok(events)) => {
-                    let config_changed = events.iter().any(|e| e.path == path);
-                    if config_changed {
-                        match load_config() {
-                            Ok(config) => {
-                                println!("Config reloaded: {:?}", config);
-                                let _ = app_handle.emit("config-changed", &config);
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to reload config: {e}");
-                            }
-                        }
-                    }
-                }
-                Ok(Err(error)) => {
-                    eprintln!("Config watch error: {error:?}");
-                }
-                Err(_) => break, // Channel closed
-            }
-        }
-    });
-}
-
 pub fn open_config_file() -> Result<(), String> {
-    let path = config_path();
-    std::process::Command::new("open")
-        .arg(&path)
-        .spawn()
-        .map_err(|e| format!("Failed to open config file: {e}"))?;
-    Ok(())
+    open::that(config_path()).map_err(|error| format!("Failed to open config file: {error}"))
 }

@@ -8,7 +8,7 @@ interface UseKeyboardParams {
   searchText: string;
   highlightIndex: number;
   flatResults: Prompt[];
-  sectionJumpIndexes: number[];
+  categoryJumpIndexes: number[];
   stagedItems: StagedItem[];
   stagingHighlight: number;
   showShortcuts: boolean;
@@ -33,7 +33,7 @@ export function useKeyboard({
   searchText,
   highlightIndex,
   flatResults,
-  sectionJumpIndexes,
+  categoryJumpIndexes,
   stagedItems,
   stagingHighlight,
   showShortcuts,
@@ -113,16 +113,29 @@ export function useKeyboard({
         return;
       }
 
+      const searchInput = searchInputRef.current;
+      if (
+        e.key === "ArrowRight" &&
+        searchInput &&
+        document.activeElement === searchInput &&
+        !e.metaKey &&
+        (e.altKey || e.ctrlKey || e.shiftKey ||
+          searchInput.selectionStart !== searchInput.value.length ||
+          searchInput.selectionEnd !== searchInput.value.length)
+      ) {
+        return;
+      }
+
       if (focusContext === "results") {
         switch (e.key) {
           case "ArrowDown": {
             e.preventDefault();
-            if (e.altKey && sectionJumpIndexes.length > 0) {
-              const nextSection = sectionJumpIndexes.find(
+            if (e.altKey && categoryJumpIndexes.length > 0) {
+              const nextCategory = categoryJumpIndexes.find(
                 (index) => index > highlightIndex,
               );
-              if (nextSection !== undefined) {
-                setHighlightIndex(nextSection);
+              if (nextCategory !== undefined) {
+                setHighlightIndex(nextCategory);
               }
             } else if (e.metaKey && stagedItems.length > 0) {
               onSwitchToStaging();
@@ -134,25 +147,23 @@ export function useKeyboard({
             break;
           }
           case "ArrowRight": {
-            if (e.metaKey) {
-              e.preventDefault();
-              onSwitchToPreview();
-            }
+            e.preventDefault();
+            onSwitchToPreview();
             break;
           }
           case "ArrowUp": {
             e.preventDefault();
-            if (e.altKey && sectionJumpIndexes.length > 0) {
-              let previousSection: number | undefined;
-              for (const index of sectionJumpIndexes) {
+            if (e.altKey && categoryJumpIndexes.length > 0) {
+              let previousCategory: number | undefined;
+              for (const index of categoryJumpIndexes) {
                 if (index < highlightIndex) {
-                  previousSection = index;
+                  previousCategory = index;
                 } else {
                   break;
                 }
               }
-              if (previousSection !== undefined) {
-                setHighlightIndex(previousSection);
+              if (previousCategory !== undefined) {
+                setHighlightIndex(previousCategory);
               }
             } else if (flatResults.length > 0) {
               setHighlightIndex(Math.max(highlightIndex - 1, 0));
@@ -182,10 +193,8 @@ export function useKeyboard({
             break;
           }
           case "ArrowRight": {
-            if (e.metaKey) {
-              e.preventDefault();
-              onSwitchToPreview();
-            }
+            e.preventDefault();
+            onSwitchToPreview();
             break;
           }
           case "ArrowUp": {
@@ -242,10 +251,8 @@ export function useKeyboard({
             break;
           }
           case "ArrowLeft": {
-            if (e.metaKey) {
-              e.preventDefault();
-              onSwitchToResults();
-            }
+            e.preventDefault();
+            onSwitchToResults();
             break;
           }
         }
@@ -259,7 +266,7 @@ export function useKeyboard({
     searchText,
     highlightIndex,
     flatResults,
-    sectionJumpIndexes,
+    categoryJumpIndexes,
     stagedItems,
     stagingHighlight,
     showShortcuts,
